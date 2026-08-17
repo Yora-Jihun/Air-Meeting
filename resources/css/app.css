@@ -1,0 +1,28 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+
+@theme {
+    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+
+    /*
+     * A deliberately-picked indigo, not Tailwind's stock `blue`. The
+     * default `blue-500`/`blue-600` pairing is the single most-recognized
+     * "AI generated SaaS" tell there is — it's the first thing every
+     * scaffolded dark-mode dashboard reaches for. This ramp sits closer to
+     * violet, giving the app an actual brand identity instead of "whatever
+     * shipped with the framework".
+     */
+    --color-brand-50: #eef0ff;
+    --color-brand-100: #e0e4ff;
+    --color-brand-200: #c6cbff;
+    --color-brand-300: #a3a9fd;
+    --color-brand-400: #7c7ffa;
+    --color-brand-500: #5c5bf0;
+    --color-brand-600: #4a43d9;
+    --color-brand-700: #3b34b0;
+    --color-brand-800: #302c8c;
+    --color-brand-900: #29276f;
+}
