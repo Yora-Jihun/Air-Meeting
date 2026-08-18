@@ -18,8 +18,6 @@ class Create extends Component
     #[Validate('nullable|in:1,24,168')]
     public ?string $expiresInHours = null;
 
-    public bool $showOptions = false;
-
     public function create(MeetingService $meetings)
     {
         $this->validate();
@@ -36,7 +34,15 @@ class Create extends Component
         // except embedded in this redirect's session write.
         session(["meeting.{$meeting->uuid}.host_token" => $meeting->host_token]);
 
-        return $this->redirect(route('meeting.show', $meeting), navigate: false);
+        // navigate: true (Livewire's managed SPA-style transition) instead
+        // of a raw redirect: with navigate: false, the AJAX request finishes
+        // — and wire:loading clears, showing the button's default label
+        // again — a beat before window.location actually navigates, so
+        // "New meeting" visibly flickered back before the page changed.
+        // Safe here specifically because the page being left (home) never
+        // holds camera/mic/WebRTC state that would need explicit teardown
+        // first.
+        return $this->redirect(route('meeting.show', $meeting), navigate: true);
     }
 
     public function render()

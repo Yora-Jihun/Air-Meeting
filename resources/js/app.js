@@ -18,6 +18,7 @@ document.addEventListener('alpine:init', () => {
         removedReason: null,
         selfJoinedAt: null,
         peers: {},
+        chatMessages: [],
     });
 });
 

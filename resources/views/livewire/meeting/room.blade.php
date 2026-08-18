@@ -10,6 +10,7 @@
                 joinedAt: @js($joinedAt),
                 createdAt: @js($meeting->created_at->toIso8601String()),
                 isHost: @js($isHost),
+                initialMessages: @js($initialMessages),
             })"
             x-init="init()"
             @keydown.escape.window="inviteOpen = false"
@@ -38,7 +39,7 @@
                     </div>
                     <div class="min-w-0">
                         <h1 class="truncate text-sm font-semibold text-slate-100">{{ $meeting->title ?: 'Meeting' }}</h1>
-                        <p class="font-mono text-xs text-slate-500" x-text="formattedDuration()"></p>
+                        <p class="font-mono text-xs text-slate-400" x-text="formattedDuration()"></p>
                     </div>
                 </div>
 
@@ -46,6 +47,7 @@
                     @if ($isHost)
                         <x-button
                             wire:click="toggleLock"
+                            target="toggleLock"
                             variant="secondary"
                             class="h-9 px-2.5 text-xs sm:px-3.5"
                             aria-label="{{ $meeting->is_locked ? 'Unlock meeting' : 'Lock meeting' }}"
@@ -54,8 +56,8 @@
                             <span class="hidden sm:inline" aria-hidden="true">{{ $meeting->is_locked ? 'Locked' : 'Lock' }}</span>
                         </x-button>
                         <x-button
-                            wire:click="endMeeting"
-                            wire:confirm="End this meeting for everyone?"
+                            @click="endMeeting()"
+                            busy="endingMeeting"
                             variant="danger-subtle"
                             class="h-9 px-2.5 text-xs sm:px-3.5"
                             aria-label="End meeting for everyone"
@@ -104,7 +106,7 @@
                                     @click="copyLink('inviteLinkInput')"
                                     aria-live="polite"
                                     class="flex shrink-0 items-center gap-1 rounded-lg px-3 py-2 text-xs font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
-                                    :class="copied ? 'bg-emerald-500 text-white' : 'bg-white/10 text-slate-200 hover:bg-white/15'"
+                                    :class="copied ? 'bg-brand-500 text-white' : 'bg-white/10 text-slate-200 hover:bg-white/15'"
                                 >
                                     <x-icon :name="'check'" class="size-3.5" x-show="copied" />
                                     <x-icon :name="'link'" class="size-3.5" x-show="! copied" x-cloak />
@@ -119,84 +121,168 @@
             <div class="flex flex-1 overflow-hidden">
                 {{-- Mobile-only dimmed backdrop behind the sliding-in panel below. --}}
                 <div
-                    x-show="participantsOpen"
+                    x-show="sidebarOpen"
                     x-cloak
                     x-transition.opacity
                     class="fixed inset-0 z-30 bg-black/60 sm:hidden"
-                    @click="participantsOpen = false"
+                    @click="sidebarOpen = false"
                 ></div>
 
-                {{-- Participant list: open by default, docked on the left as a
-                     true side-by-side column on sm+ screens — no click needed
-                     to see who's here. On mobile there isn't room to split the
-                     screen, so it becomes a dismissible overlay instead. --}}
+                {{-- Sidebar: open by default, docked on the left as a true
+                     side-by-side column on sm+ screens — no click needed to
+                     see who's here. On mobile there isn't room to split the
+                     screen, so it becomes a dismissible overlay instead.
+                     Participants and Chat share this one panel as tabs
+                     rather than each getting their own sliding aside, so
+                     only one backdrop/z-index stack has to be reasoned
+                     about on mobile. --}}
                 <aside
                     id="participants-panel"
-                    x-show="participantsOpen"
+                    x-show="sidebarOpen"
                     x-cloak
                     x-transition
-                    @keydown.escape="participantsOpen = false"
-                    aria-label="Participants"
+                    @keydown.escape="sidebarOpen = false"
+                    aria-label="Sidebar"
                     class="fixed inset-y-0 left-0 z-40 flex w-80 max-w-[85vw] flex-col border-r border-white/10 bg-slate-900 sm:static sm:z-auto sm:max-w-none"
                 >
-                    <div class="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-3">
-                        <p class="text-sm font-medium text-slate-200">Participants</p>
+                    <div class="flex shrink-0 items-center justify-between gap-1 border-b border-white/10 px-2 py-2">
+                        <div class="flex items-center gap-1" role="tablist">
+                            <button
+                                type="button"
+                                role="tab"
+                                :aria-selected="sidebarTab === 'participants'"
+                                @click="openSidebar('participants')"
+                                class="rounded-lg px-3 py-1.5 text-sm font-medium transition"
+                                :class="sidebarTab === 'participants' ? 'bg-white/10 text-slate-100' : 'text-slate-400 hover:text-slate-200'"
+                            >
+                                Participants
+                            </button>
+                            <button
+                                type="button"
+                                role="tab"
+                                :aria-selected="sidebarTab === 'chat'"
+                                @click="openSidebar('chat')"
+                                class="relative rounded-lg px-3 py-1.5 text-sm font-medium transition"
+                                :class="sidebarTab === 'chat' ? 'bg-white/10 text-slate-100' : 'text-slate-400 hover:text-slate-200'"
+                            >
+                                Chat
+                                <span
+                                    x-show="unreadChatCount() > 0"
+                                    x-cloak
+                                    x-text="unreadChatCount()"
+                                    class="ml-1 rounded-full bg-brand-500 px-1.5 py-0.5 text-[10px] font-semibold text-white"
+                                ></span>
+                            </button>
+                        </div>
                         <button
-                            @click="participantsOpen = false"
-                            aria-label="Close participant list"
-                            class="flex size-7 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/10 hover:text-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+                            @click="sidebarOpen = false"
+                            aria-label="Close sidebar"
+                            class="flex size-7 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/10 hover:text-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
                         >
                             <x-icon name="x-mark" class="size-4" />
                         </button>
                     </div>
 
-                    <ul class="flex-1 space-y-0.5 overflow-y-auto p-2">
-                        <template x-for="p in participantsList()" :key="p.id">
-                            <li class="flex items-center gap-3 rounded-lg px-2 py-2 transition hover:bg-white/5">
-                                <span class="flex size-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-medium text-slate-300" x-text="p.name.charAt(0).toUpperCase()" aria-hidden="true"></span>
-                                <span class="min-w-0 flex-1">
-                                    <span class="flex items-center gap-1.5">
-                                        <span class="truncate text-sm text-slate-200" x-text="p.name"></span>
-                                        <span x-show="p.isSelf" class="shrink-0 text-xs text-slate-500">(you)</span>
-                                        <span x-show="p.isHost" x-cloak class="shrink-0 rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-400">Host</span>
-                                    </span>
-                                    <span class="block text-xs text-slate-500" x-text="statusText(p)"></span>
-                                </span>
-                                <span class="flex shrink-0 items-center gap-1">
-                                    <x-icon name="mic-off" class="size-3.5 text-red-400" x-show="! p.micOn" aria-label="Muted" />
-                                    <x-icon name="video-off" class="size-3.5 text-red-400" x-show="! p.camOn" x-cloak aria-label="Camera off" />
-                                </span>
-                            </li>
-                        </template>
-                    </ul>
+                    <template x-if="sidebarTab === 'participants'">
+                        <div class="flex flex-1 flex-col overflow-hidden">
+                            <ul class="flex-1 space-y-0.5 overflow-y-auto p-2">
+                                <template x-for="p in participantsList()" :key="p.id">
+                                    <li class="flex items-center gap-3 rounded-lg px-2 py-2 transition hover:bg-white/5">
+                                        <span class="flex size-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-medium text-slate-300" x-text="p.name.charAt(0).toUpperCase()" aria-hidden="true"></span>
+                                        <span class="min-w-0 flex-1">
+                                            <span class="flex items-center gap-1.5">
+                                                <span class="truncate text-sm text-slate-200" x-text="p.name"></span>
+                                                <span x-show="p.isSelf" class="shrink-0 text-xs text-slate-400">(you)</span>
+                                                <span x-show="p.isHost" x-cloak class="shrink-0 rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-400">Host</span>
+                                            </span>
+                                            <span class="block text-xs text-slate-400" x-text="statusText(p)"></span>
+                                        </span>
+                                        <span class="flex shrink-0 items-center gap-1">
+                                            <x-icon name="mic-off" class="size-3.5 text-red-400" x-show="! p.micOn" aria-label="Muted" />
+                                            <x-icon name="video-off" class="size-3.5 text-red-400" x-show="! p.camOn" x-cloak aria-label="Camera off" />
+                                        </span>
+                                    </li>
+                                </template>
+                            </ul>
 
-                    <div class="shrink-0 border-t border-white/10 p-3">
-                        <p class="text-xs font-medium text-slate-300">Invite others</p>
-                        <p class="mt-0.5 text-xs text-slate-500">Share this link to invite people</p>
+                            <div class="shrink-0 border-t border-white/10 p-3">
+                                <p class="text-xs font-medium text-slate-300">Invite others</p>
+                                <p class="mt-0.5 text-xs text-slate-400">Share this link to invite people</p>
 
-                        <div class="mt-2 flex items-center gap-2">
-                            <label for="sidebar-invite-link" class="sr-only">Meeting link</label>
-                            <input
-                                id="sidebar-invite-link"
-                                type="text"
-                                readonly
-                                x-ref="sidebarInviteLinkInput"
-                                value="{{ route('meeting.show', $meeting) }}"
-                                @click="$el.select()"
-                                class="w-full truncate rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 focus:border-brand-500 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-brand-400"
-                            >
-                            <button
-                                @click="copyLink('sidebarInviteLinkInput')"
-                                aria-live="polite"
-                                aria-label="Copy meeting link"
-                                class="flex shrink-0 items-center justify-center rounded-lg p-2.5 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
-                                :class="copied ? 'bg-emerald-500 text-white' : 'bg-white/10 text-slate-200 hover:bg-white/15'"
-                            >
-                                <x-icon :name="'check'" class="size-3.5" x-show="copied" />
-                                <x-icon :name="'link'" class="size-3.5" x-show="! copied" x-cloak />
-                            </button>
+                                <div class="mt-2 flex items-center gap-2">
+                                    <label for="sidebar-invite-link" class="sr-only">Meeting link</label>
+                                    <input
+                                        id="sidebar-invite-link"
+                                        type="text"
+                                        readonly
+                                        x-ref="sidebarInviteLinkInput"
+                                        value="{{ route('meeting.show', $meeting) }}"
+                                        @click="$el.select()"
+                                        class="w-full truncate rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 focus:border-brand-500 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-brand-400"
+                                    >
+                                    <button
+                                        @click="copyLink('sidebarInviteLinkInput')"
+                                        aria-live="polite"
+                                        aria-label="Copy meeting link"
+                                        class="flex shrink-0 items-center justify-center rounded-lg p-2.5 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+                                        :class="copied ? 'bg-brand-500 text-white' : 'bg-white/10 text-slate-200 hover:bg-white/15'"
+                                    >
+                                        <x-icon :name="'check'" class="size-3.5" x-show="copied" />
+                                        <x-icon :name="'link'" class="size-3.5" x-show="! copied" x-cloak />
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    </template>
+
+                    {{-- Chat: whispered peer-to-peer over the same presence
+                         channel as mic/cam state and screen-share signals
+                         (see resources/js/webrtc/signaling.js) rather than
+                         stored server-side — nothing here survives a
+                         refresh or is visible to someone who joins late,
+                         matching the rest of this app's no-accounts,
+                         nothing-persisted-beyond-the-call posture. --}}
+                    <template x-if="sidebarTab === 'chat'">
+                        <div class="flex flex-1 flex-col overflow-hidden">
+                            <ul x-ref="chatList" class="flex-1 space-y-3 overflow-y-auto p-3" aria-label="Chat messages" aria-live="polite">
+                                <li x-show="$store.room.chatMessages.length === 0" x-cloak class="pointer-events-none pt-6 text-center text-xs text-slate-400">
+                                    No messages yet. Say hello.
+                                </li>
+                                <template x-for="m in $store.room.chatMessages" :key="m.id">
+                                    <li class="flex flex-col" :class="m.isSelf ? 'items-end' : 'items-start'">
+                                        <span class="px-1 text-xs text-slate-400" x-text="m.isSelf ? 'You' : m.name"></span>
+                                        <p
+                                            class="mt-0.5 max-w-[85%] break-words rounded-xl px-3 py-1.5 text-sm"
+                                            :class="m.isSelf ? 'bg-brand-500 text-white' : 'bg-white/10 text-slate-100'"
+                                            x-text="m.message"
+                                        ></p>
+                                    </li>
+                                </template>
+                            </ul>
+
+                            <form @submit.prevent="sendChatMessage()" class="shrink-0 border-t border-white/10 p-3">
+                                <label for="chat-input" class="sr-only">Message everyone</label>
+                                <div class="flex items-center gap-2">
+                                    <input
+                                        id="chat-input"
+                                        type="text"
+                                        x-model="chatDraft"
+                                        maxlength="500"
+                                        placeholder="Message everyone"
+                                        class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-brand-500 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-brand-400"
+                                    >
+                                    <button
+                                        type="submit"
+                                        :disabled="! chatDraft.trim()"
+                                        aria-label="Send message"
+                                        class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-500 text-white transition hover:bg-brand-600 disabled:opacity-40 disabled:pointer-events-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+                                    >
+                                        <x-icon name="send" class="size-4" />
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </template>
                 </aside>
 
                 <main class="relative flex flex-1 flex-col gap-3 overflow-hidden p-3 sm:p-6">
@@ -241,8 +327,16 @@
                         </div>
                     </template>
 
-                    {{-- Presentation stage: hidden until someone shares their screen --}}
-                    <div x-ref="stage" class="hidden min-h-0 flex-1 overflow-hidden rounded-xl border border-white/10 bg-black">
+                    {{-- Presentation stage: hidden until someone shares their screen.
+                         wire:ignore — RoomController sets stageVideo.srcObject and
+                         stageLabel's text directly, and toggles this wrapper's own
+                         `hidden` class imperatively (see showPresenter()/clearStage()
+                         in room.js), none of which Livewire's server-rendered HTML
+                         ever reflects. Without wire:ignore, any Livewire re-render of
+                         this component (e.g. the host clicking Lock) morphs this
+                         subtree back to its always-empty server markup, silently
+                         losing the live video mid-call. --}}
+                    <div wire:ignore x-ref="stage" class="hidden min-h-0 flex-1 overflow-hidden rounded-xl border border-white/10 bg-black">
                         <div class="relative h-full w-full">
                             <video x-ref="stageVideo" autoplay playsinline class="h-full w-full object-contain"></video>
                             <span
@@ -274,8 +368,23 @@
                         {{-- Participant thumbnails. RoomController appends/removes tiles
                              here directly. auto-fit + centered tracks means a lone
                              participant gets one large, centered tile instead of being
-                             stuck in a corner of an empty grid. --}}
+                             stuck in a corner of an empty grid.
+
+                             wire:ignore is load-bearing, not decorative: this div is
+                             always empty in Livewire's server-rendered HTML (the tiles
+                             only ever exist as live DOM nodes RoomController appended
+                             itself), so without it, any Livewire re-render of this
+                             component — e.g. the host clicking Lock/Unlock — morphs
+                             the grid back to that empty markup, wiping every
+                             participant's video off screen until a hard refresh.
+                             activeController's guard (room.js) then correctly stops
+                             init() from running again, so nothing ever re-populates
+                             it on its own. Alpine's own :class binding below is
+                             unaffected — wire:ignore only opts this subtree out of
+                             Livewire's morph pass, not Alpine's independent
+                             reactivity. --}}
                         <div
+                            wire:ignore
                             x-ref="grid"
                             role="list"
                             aria-label="Video feeds"
@@ -288,7 +397,7 @@
                             x-cloak
                             class="pointer-events-none text-center text-sm text-slate-400"
                         >
-                            Waiting for others to join — share the invite link to bring them in.
+                            Waiting for others to join. Share the invite link to bring them in.
                         </p>
                     </div>
                 </main>
@@ -320,7 +429,7 @@
                 </button>
 
                 <button
-                    @click="$store.room.presenterId === controller.participantId ? controller.stopPresenting() : controller.startPresenting()"
+                    @click="togglePresenting()"
                     :aria-pressed="$store.room.presenterId === controller.participantId"
                     :aria-label="$store.room.presenterId === controller.participantId ? 'Stop presenting' : 'Present your screen'"
                     class="flex h-11 shrink-0 items-center gap-2 rounded-full px-3 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 sm:px-4"
@@ -331,19 +440,38 @@
                 </button>
 
                 <button
-                    @click="participantsOpen = ! participantsOpen"
+                    @click="toggleSidebar('participants')"
                     aria-controls="participants-panel"
-                    x-bind:aria-expanded="participantsOpen"
+                    x-bind:aria-expanded="sidebarOpen && sidebarTab === 'participants'"
                     aria-label="Toggle participant list"
                     class="flex h-11 shrink-0 items-center gap-2 rounded-full px-3 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 sm:px-4"
-                    :class="participantsOpen ? 'bg-white/20 text-white' : 'bg-white/10 text-slate-200 hover:bg-white/15'"
+                    :class="sidebarOpen && sidebarTab === 'participants' ? 'bg-white/20 text-white' : 'bg-white/10 text-slate-200 hover:bg-white/15'"
                 >
                     <x-icon name="users" class="size-5" />
                     <span class="hidden sm:inline" aria-hidden="true" x-text="'Participants (' + $store.room.participantCount + ')'"></span>
                 </button>
 
+                <button
+                    @click="toggleSidebar('chat')"
+                    aria-controls="participants-panel"
+                    x-bind:aria-expanded="sidebarOpen && sidebarTab === 'chat'"
+                    aria-label="Toggle chat"
+                    class="relative flex h-11 shrink-0 items-center gap-2 rounded-full px-3 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 sm:px-4"
+                    :class="sidebarOpen && sidebarTab === 'chat' ? 'bg-white/20 text-white' : 'bg-white/10 text-slate-200 hover:bg-white/15'"
+                >
+                    <x-icon name="chat" class="size-5" />
+                    <span class="hidden sm:inline" aria-hidden="true">Chat</span>
+                    <span
+                        x-show="unreadChatCount() > 0"
+                        x-cloak
+                        x-text="unreadChatCount()"
+                        class="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-brand-500 text-[10px] font-semibold text-white"
+                    ></span>
+                </button>
+
                 <x-button
                     @click="leaveCall()"
+                    busy="leaving"
                     variant="danger"
                     shape="full"
                     class="h-11 px-4 text-sm sm:px-5"

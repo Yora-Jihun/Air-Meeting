@@ -207,4 +207,32 @@ class MeetingRoomRenderTest extends TestCase
         Livewire::test(Room::class, ['meeting' => $meeting])
             ->assertSet('joinedAt', $participant->joined_at->toIso8601String());
     }
+
+    /**
+     * Regression test for a real bug: the video tile grid and the
+     * presentation stage only ever get populated by RoomController
+     * appending DOM nodes itself (resources/js/webrtc/room.js) — Livewire's
+     * server-rendered HTML for both is always empty, since it has no idea
+     * those tiles exist. Without wire:ignore, ANY Livewire re-render of this
+     * component (toggleLock, kick, sendChat — not just the Lock button the
+     * bug was first noticed on) morphs both back to that always-empty
+     * markup, silently wiping every participant's video off screen until a
+     * hard refresh. activeController's duplicate-init guard then correctly
+     * stops init() from running again, so nothing ever recovers on its own.
+     */
+    public function test_video_grid_and_presentation_stage_are_wire_ignored(): void
+    {
+        $meeting = Meeting::factory()->create();
+        $participantId = (string) Str::uuid();
+
+        app(ParticipantService::class)->join($meeting, $participantId, 'Debugger');
+
+        $html = $this->withSession([
+            "meeting.{$meeting->uuid}.participant_id" => $participantId,
+            "meeting.{$meeting->uuid}.display_name" => 'Debugger',
+        ])->get("/meet/{$meeting->uuid}")->getContent();
+
+        $this->assertMatchesRegularExpression('/wire:ignore\s+x-ref="grid"/', $html);
+        $this->assertMatchesRegularExpression('/wire:ignore\s+x-ref="stage"/', $html);
+    }
 }

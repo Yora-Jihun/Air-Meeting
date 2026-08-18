@@ -10,7 +10,7 @@
  * attribute for a stray quote to break out of — and keeps this testable
  * and lintable like normal code.
  */
-export function meetingRoom({ meetingUuid, participantId, displayName, joinedAt, createdAt, isHost }) {
+export function meetingRoom({ meetingUuid, participantId, displayName, joinedAt, createdAt, isHost, initialMessages = [] }) {
     return {
         meetingUuid,
         participantId,
@@ -26,8 +26,20 @@ export function meetingRoom({ meetingUuid, participantId, displayName, joinedAt,
         // defaulting it open there would cover the video on load instead of
         // showing the call. Only auto-open where it actually docks beside
         // the video instead of on top of it.
-        participantsOpen: window.matchMedia('(min-width: 640px)').matches,
+        sidebarOpen: window.matchMedia('(min-width: 640px)').matches,
+        sidebarTab: 'participants',
+        chatDraft: '',
+        // How many of $store.room.chatMessages the user has already seen —
+        // not a boolean per message, since messages only ever append and
+        // are never marked individually read/unread.
+        readChatCount: 0,
         elapsedSeconds: 0,
+        // Drive the Leave/End meeting buttons' spinners instead of
+        // wire:loading — both actions redirect on success, and
+        // wire:loading clears in the same synchronous tick Livewire fires
+        // that redirect (see leaveCall()/endMeeting() below).
+        leaving: false,
+        endingMeeting: false,
 
         participantsList() {
             const peers = Object.entries(this.$store.room.peers).map(([id, p]) => ({
@@ -124,9 +136,35 @@ export function meetingRoom({ meetingUuid, participantId, displayName, joinedAt,
             const mobileQuery = window.matchMedia('(max-width: 639px)');
             mobileQuery.addEventListener('change', (e) => {
                 if (e.matches) {
-                    this.participantsOpen = false;
+                    this.sidebarOpen = false;
                 }
             });
+
+            // Chat messages land outside Alpine's own reactivity (pushed
+            // imperatively by RoomController, like peer/media state), so a
+            // message arriving while the chat tab is already open still
+            // needs an explicit nudge to mark itself read and scroll into
+            // view.
+            this.$watch('$store.room.chatMessages.length', () => {
+                if (this.sidebarOpen && this.sidebarTab === 'chat') {
+                    this.markChatRead();
+                }
+            });
+
+            // Seeds chat history exactly once. Re-running init() (the
+            // duplicate-init bug this file's docblock describes) must not
+            // wipe out messages received since the page loaded — guarding
+            // on an empty list makes reseeding a harmless no-op rather than
+            // a data loss the second time around.
+            if (this.$store.room.chatMessages.length === 0) {
+                this.$store.room.chatMessages = initialMessages.map((m) => ({
+                    id: m.id,
+                    from: m.participant_id,
+                    name: m.name,
+                    message: m.message,
+                    isSelf: m.participant_id === this.participantId,
+                }));
+            }
 
             if (this.controller) {
                 return;
@@ -151,8 +189,58 @@ export function meetingRoom({ meetingUuid, participantId, displayName, joinedAt,
         },
 
         async leaveCall() {
+            this.leaving = true;
             await this.controller?.stop();
-            this.$wire.leave();
+            // Awaited (not fire-and-forget): only once this resolves —
+            // strictly after Livewire has processed the redirect effect —
+            // does `leaving` reset, so the button's own spinner (see
+            // busy="leaving" in room.blade.php) stays up through the exact
+            // window where wire:loading would already have reverted.
+            await this.$wire.leave();
+            this.leaving = false;
+        },
+
+        /** Host-only "End meeting" — tears down the host's own call state
+         * first, same as leaveCall(), since Room::endMeeting() now
+         * navigates (swaps the DOM) instead of a hard page reload, which
+         * would otherwise leave the host's camera/mic/WebRTC/Echo state
+         * running in the background after the redirect. The confirmation
+         * moved here (native confirm(), replacing wire:confirm on the
+         * button) so it happens before that teardown, not after. */
+        async endMeeting() {
+            if (! confirm('End this meeting for everyone?')) {
+                return;
+            }
+
+            this.endingMeeting = true;
+            await this.controller?.stop();
+            await this.$wire.endMeeting();
+            this.endingMeeting = false;
+        },
+
+        /**
+         * The Present button's click handler — Google Meet's takeover
+         * flow: at most one presenter, and starting a share while someone
+         * else already has the stage prompts to confirm taking over
+         * rather than either silently stealing it or being blocked
+         * outright. (The other half — actually tearing down the displaced
+         * presenter's own stream once this happens — is handled
+         * reactively on *their* client by RoomController.
+         * handlePresentationSignal(), not here.)
+         */
+        togglePresenting() {
+            const presenterId = this.$store.room.presenterId;
+
+            if (presenterId === this.controller?.participantId) {
+                this.controller.stopPresenting();
+                return;
+            }
+
+            if (presenterId && ! confirm(`${this.$store.room.presenterName} is presenting. Stop their presentation and share your screen instead?`)) {
+                return;
+            }
+
+            this.controller?.startPresenting();
         },
 
         /** "Allow access" on the permission-blocked banner — re-checks
@@ -170,6 +258,61 @@ export function meetingRoom({ meetingUuid, participantId, displayName, joinedAt,
             this.controller?.replaceLocalStream(stream);
             this.controller?.setTileMediaState(this.participantId, this.$store.room.micOn, this.$store.room.camOn);
             this.controller?.signaling.announceMediaState(this.$store.room.micOn, this.$store.room.camOn);
+        },
+
+        /** Switch the sidebar to a tab and make sure it's open. */
+        openSidebar(tab) {
+            this.sidebarTab = tab;
+            this.sidebarOpen = true;
+
+            if (tab === 'chat') {
+                this.markChatRead();
+            }
+        },
+
+        /** The footer's Participants/Chat buttons: re-clicking the tab
+         * that's already showing closes the sidebar instead of doing
+         * nothing, matching a normal toggle button. */
+        toggleSidebar(tab) {
+            if (this.sidebarOpen && this.sidebarTab === tab) {
+                this.sidebarOpen = false;
+                return;
+            }
+
+            this.openSidebar(tab);
+        },
+
+        markChatRead() {
+            this.readChatCount = this.$store.room.chatMessages.length;
+            this.$nextTick(() => this.scrollChatToBottom());
+        },
+
+        scrollChatToBottom() {
+            if (this.$refs.chatList) {
+                this.$refs.chatList.scrollTop = this.$refs.chatList.scrollHeight;
+            }
+        },
+
+        unreadChatCount() {
+            return Math.max(0, this.$store.room.chatMessages.length - this.readChatCount);
+        },
+
+        // Goes through Livewire (persisted + broadcast — see App\Livewire\
+        // Meeting\Room::sendChat), not the WebRTC signaling channel: unlike
+        // mic/cam state or presentation, a chat message has to survive a
+        // refresh. There's no local optimistic append here either — the
+        // sender sees their own message the same way everyone else does,
+        // via the chatMessages.length watcher above once the broadcast
+        // comes back.
+        sendChatMessage() {
+            const text = this.chatDraft.trim();
+
+            if (! text) {
+                return;
+            }
+
+            this.$wire.sendChat(text);
+            this.chatDraft = '';
         },
 
         /**

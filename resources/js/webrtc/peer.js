@@ -20,6 +20,16 @@ export class Peer {
         this.onTrack = onTrack;
         this.makingOffer = false;
         this.ignoreOffer = false;
+        // ICE candidates can — and with several peers negotiating at once,
+        // routinely do — arrive over the whisper channel before the
+        // corresponding setRemoteDescription() has resolved (they're
+        // independent async messages with no ordering guarantee beyond
+        // "sent after" the description). addIceCandidate() throws if
+        // there's no remote description yet, so anything that arrives too
+        // early is buffered here and flushed once one is set, instead of
+        // being dropped — the standard fix for this in every perfect
+        // negotiation reference implementation.
+        this.pendingCandidates = [];
 
         this.connection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
         this.senders = new Map(); // track.kind/id -> RTCRtpSender, for later replaceTrack/removeTrack
@@ -67,6 +77,7 @@ export class Peer {
             }
 
             await this.connection.setRemoteDescription(description);
+            await this.flushPendingCandidates();
 
             if (description.type === 'offer') {
                 await this.connection.setLocalDescription();
@@ -77,11 +88,32 @@ export class Peer {
         }
 
         if (candidate) {
+            if (! this.connection.remoteDescription) {
+                this.pendingCandidates.push(candidate);
+
+                return;
+            }
+
             try {
                 await this.connection.addIceCandidate(candidate);
             } catch (err) {
                 if (! this.ignoreOffer) {
                     throw err;
+                }
+            }
+        }
+    }
+
+    async flushPendingCandidates() {
+        const candidates = this.pendingCandidates;
+        this.pendingCandidates = [];
+
+        for (const candidate of candidates) {
+            try {
+                await this.connection.addIceCandidate(candidate);
+            } catch (err) {
+                if (! this.ignoreOffer) {
+                    console.error('[webrtc] buffered ICE candidate failed', err);
                 }
             }
         }

@@ -80,4 +80,53 @@ class MeetingJoinTest extends TestCase
             ->call('join')
             ->assertSet('error', 'This meeting is full.');
     }
+
+    public function test_the_join_form_flags_a_password_protected_meeting(): void
+    {
+        $meeting = Meeting::factory()->withPassword('letmein')->create();
+
+        Livewire::test(Join::class, ['meeting' => $meeting, 'participantId' => (string) Str::uuid()])
+            ->assertSet('requiresPassword', true);
+    }
+
+    public function test_joining_a_password_protected_meeting_with_the_correct_password_succeeds(): void
+    {
+        $meeting = Meeting::factory()->withPassword('letmein')->create();
+        $participantId = (string) Str::uuid();
+
+        Livewire::test(Join::class, ['meeting' => $meeting, 'participantId' => $participantId])
+            ->set('displayName', 'Alice')
+            ->set('password', 'letmein')
+            ->call('join')
+            ->assertDispatched('participant-joined', participantId: $participantId);
+
+        $this->assertDatabaseHas('participants', [
+            'meeting_id' => $meeting->id,
+            'participant_id' => $participantId,
+        ]);
+    }
+
+    public function test_joining_a_password_protected_meeting_with_the_wrong_password_is_rejected(): void
+    {
+        $meeting = Meeting::factory()->withPassword('letmein')->create();
+
+        Livewire::test(Join::class, ['meeting' => $meeting, 'participantId' => (string) Str::uuid()])
+            ->set('displayName', 'Alice')
+            ->set('password', 'wrong')
+            ->call('join')
+            ->assertSet('error', 'Incorrect meeting password.')
+            ->assertNotDispatched('participant-joined');
+
+        $this->assertDatabaseCount('participants', 0);
+    }
+
+    public function test_joining_a_password_protected_meeting_without_entering_a_password_is_rejected(): void
+    {
+        $meeting = Meeting::factory()->withPassword('letmein')->create();
+
+        Livewire::test(Join::class, ['meeting' => $meeting, 'participantId' => (string) Str::uuid()])
+            ->set('displayName', 'Alice')
+            ->call('join')
+            ->assertSet('error', 'Incorrect meeting password.');
+    }
 }

@@ -9,9 +9,13 @@
  *    Laravel controller/event. This keeps signaling latency to a single
  *    WebSocket hop and avoids writing a PHP class per SDP message.
  *
- * Meeting-level control events (kicked, meeting ended) are true Laravel
- * broadcast events (see App\Events) since those originate from server
- * state changes, not from a peer's browser.
+ * Meeting-level control events (kicked, meeting ended) and chat messages
+ * are true Laravel broadcast events (see App\Events). Kicked/ended
+ * originate from server state changes; chat is here too, despite
+ * originating from a peer's browser, because it's persisted (unlike the
+ * whispered signals above) so it survives a refresh and reaches anyone
+ * who joins mid-call — sending one is a Livewire call
+ * ($wire.sendChat in room-alpine.js), not a whisper.
  */
 export class SignalingClient {
     constructor(meetingUuid, participantId) {
@@ -22,7 +26,7 @@ export class SignalingClient {
 
     join({
         onHere, onJoining, onLeaving, onSignal, onPresentation,
-        onMediaState, onSpeaking, onKicked, onMeetingEnded,
+        onMediaState, onSpeaking, onChat, onKicked, onMeetingEnded,
     }) {
         this.channel = window.Echo.join(`meeting.${this.meetingUuid}`)
             .here((members) => onHere(members.filter((m) => m.id !== this.participantId)))
@@ -60,6 +64,11 @@ export class SignalingClient {
                     onSpeaking(payload);
                 }
             })
+            // Chat: a real broadcast (see App\Events\ChatMessageSent), not a
+            // whisper, and NOT filtered by participant id — it's meant to
+            // reach the sender's own other tabs too, since there's no
+            // separate optimistic local echo for a message you just sent.
+            .listen('.chat.message.sent', (payload) => onChat(payload))
             .listen('.participant.kicked', (event) => {
                 if (event.participant_id === this.participantId) {
                     onKicked();

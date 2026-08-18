@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Exceptions\MeetingUnavailableException;
 use App\Models\Meeting;
+use App\Services\ChatService;
 use App\Services\MeetingService;
+use App\Services\ParticipantService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -115,6 +117,21 @@ class MeetingServiceTest extends TestCase
         app(MeetingService::class)->end($meeting);
 
         $this->assertSame('ended', $meeting->fresh()->status);
+    }
+
+    public function test_end_deletes_chat_and_participants_but_keeps_the_meeting_row(): void
+    {
+        $meeting = Meeting::factory()->create();
+        $participantId = (string) Str::uuid();
+
+        app(ParticipantService::class)->join($meeting, $participantId, 'Alice');
+        app(ChatService::class)->send($meeting, $participantId, 'Alice', 'hello');
+
+        app(MeetingService::class)->end($meeting);
+
+        $this->assertDatabaseCount('chat_messages', 0);
+        $this->assertDatabaseCount('participants', 0);
+        $this->assertDatabaseHas('meetings', ['id' => $meeting->id, 'status' => 'ended']);
     }
 
     public function test_is_host_only_matches_the_correct_token(): void

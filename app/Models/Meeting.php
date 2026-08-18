@@ -66,6 +66,11 @@ class Meeting extends Model
         return $this->participants()->whereNull('left_at');
     }
 
+    public function chatMessages(): HasMany
+    {
+        return $this->hasMany(ChatMessage::class);
+    }
+
     public function isActive(): bool
     {
         return $this->status === 'active' && ! $this->isExpired();

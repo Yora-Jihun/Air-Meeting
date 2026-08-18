@@ -82,6 +82,7 @@
                         maxlength="50"
                         placeholder="Your name"
                         autofocus
+                        required
                         @error('displayName')
                             aria-invalid="true"
                             aria-describedby="display-name-error"
@@ -99,6 +100,7 @@
                             type="password"
                             wire:model="password"
                             placeholder="Meeting password"
+                            required
                             class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:border-brand-500 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-brand-400"
                         >
                     </div>
@@ -115,8 +117,7 @@
                     type="submit"
                     variant="primary"
                     class="w-full py-2.5 text-sm"
-                    wire:loading.attr="disabled"
-                    wire:target="join"
+                    target="join"
                 >
                     Join now
                 </x-button>

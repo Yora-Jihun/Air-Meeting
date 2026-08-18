@@ -7,6 +7,7 @@ use App\Events\MeetingEnded;
 use App\Exceptions\MeetingUnavailableException;
 use App\Models\Meeting;
 use Carbon\CarbonInterface;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
 /**
@@ -73,12 +74,28 @@ class MeetingService
         $meeting->update(['is_locked' => $locked]);
     }
 
+    /**
+     * Ending a meeting deletes its chat and participant rows immediately,
+     * not just eventually via PruneMeetings — this is a no-accounts app,
+     * so "the host ended the call" is the only privacy guarantee anyone
+     * gets. The meeting row itself survives (empty) for PruneMeetings to
+     * sweep up 30 days later: deleting it here would 404 the "This meeting
+     * has ended" page (see MeetingController::show) for anyone who still
+     * has the link open. Auto-expiry (TTL) is a separate path in
+     * PruneMeetings that doesn't call this method, so it still only
+     * cleans up on that 30-day schedule.
+     */
     public function end(Meeting $meeting): void
     {
-        $meeting->update([
-            'status' => 'ended',
-            'ended_at' => now(),
-        ]);
+        DB::transaction(function () use ($meeting) {
+            $meeting->update([
+                'status' => 'ended',
+                'ended_at' => now(),
+            ]);
+
+            $meeting->chatMessages()->delete();
+            $meeting->participants()->delete();
+        });
 
         $this->broadcastQuietly(new MeetingEnded($meeting->uuid));
     }

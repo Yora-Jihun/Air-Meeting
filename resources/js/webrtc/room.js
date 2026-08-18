@@ -95,6 +95,7 @@ export class RoomController {
             onPresentation: (payload) => this.handlePresentationSignal(payload),
             onMediaState: (payload) => this.handleMediaState(payload),
             onSpeaking: (payload) => this.handleSpeaking(payload.from, payload.speaking),
+            onChat: (payload) => this.handleChat(payload),
             onKicked: () => this.handleRemoved('You were removed from the meeting by the host.'),
             onMeetingEnded: () => this.handleRemoved('The host ended this meeting.'),
         });
@@ -190,9 +191,27 @@ export class RoomController {
         }
     }
 
-    /** Explicit, instant "who's presenting" control signal from a peer. */
+    /**
+     * Explicit, instant "who's presenting" control signal from a peer.
+     *
+     * Google Meet's takeover behavior: only one presenter at a time, and
+     * starting a new share always wins over whoever had the stage — but
+     * unlike a naive "last announcement wins", the peer who just got
+     * displaced has their OWN share torn down here too. Without this,
+     * nothing ever stopped the previous presenter's actual
+     * getDisplayMedia() stream or its track on every peer connection —
+     * only the *visible* stage swapped, while the outgoing screen-share
+     * video kept broadcasting invisibly in the background, and their own
+     * "Present" button silently desynced from reality (see
+     * room-alpine.js's togglePresenting() for the other half: prompting
+     * *before* a takeover happens, not just cleaning up after one).
+     */
     handlePresentationSignal({ from, presenting, name }) {
         if (presenting) {
+            if (this.screenStream && from !== this.participantId) {
+                this.stopPresenting();
+            }
+
             this.showPresenter(from, name ?? this.peers.get(from)?.name ?? 'Someone');
 
             const cachedStream = this.peers.get(from)?.screenStream;
@@ -227,6 +246,16 @@ export class RoomController {
 
     handleSpeaking(peerId, speaking) {
         this.setTileSpeaking(peerId, speaking);
+    }
+
+    /** A persisted chat message arrived via App\Events\ChatMessageSent —
+     * delivered to every participant including the sender, since sending
+     * one (room-alpine.js's sendChatMessage) has no separate local echo. */
+    handleChat({ id, participant_id: from, name, message }) {
+        this.alpineStore.chatMessages = [
+            ...this.alpineStore.chatMessages,
+            { id, from, name, message: String(message ?? '').slice(0, 500), isSelf: from === this.participantId },
+        ];
     }
 
     updatePeerState(peerId, connectionState) {
@@ -428,7 +457,7 @@ export class RoomController {
         }
 
         tile.wrapper.classList.toggle('ring-2', speaking);
-        tile.wrapper.classList.toggle('ring-emerald-500', speaking);
+        tile.wrapper.classList.toggle('ring-brand-400', speaking);
         tile.wrapper.classList.toggle('ring-1', ! speaking);
         tile.wrapper.classList.toggle('ring-white/10', ! speaking);
     }
