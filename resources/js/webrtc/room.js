@@ -188,6 +188,7 @@ export class RoomController {
 
         if (this.alpineStore.presenterId === peerId) {
             this.elements.stageVideo.srcObject = stream;
+            this.playStage();
         }
     }
 
@@ -218,6 +219,7 @@ export class RoomController {
 
             if (cachedStream) {
                 this.elements.stageVideo.srcObject = cachedStream;
+                this.playStage();
             }
         } else if (this.alpineStore.presenterId === from) {
             this.clearStage();
@@ -323,6 +325,7 @@ export class RoomController {
 
         this.showPresenter(this.participantId, `${this.displayName} (you)`);
         this.elements.stageVideo.srcObject = this.screenStream;
+        this.playStage();
         this.signaling.announcePresentation(true, this.displayName);
     }
 
@@ -358,6 +361,41 @@ export class RoomController {
         this.elements.stage.classList.add('hidden');
         this.alpineStore.presenterId = null;
         this.alpineStore.presenterName = null;
+        this.alpineStore.stageBlocked = false;
+    }
+
+    /**
+     * The stage video has no `muted` attribute (viewers should hear the
+     * presenter's shared audio), and its srcObject is always attached from
+     * an async WebSocket event, never a direct click — exactly the
+     * combination browsers block autoplay for, especially on mobile. The
+     * `autoplay` HTML attribute alone doesn't guarantee playback actually
+     * starts; without this, a blocked attempt just leaves the element
+     * silently paused on its first (black) frame forever, with nothing in
+     * the UI explaining why the "presentation" everyone can see is
+     * announced is really being shown.
+     */
+    playStage() {
+        const playPromise = this.elements.stageVideo.play();
+
+        if (! playPromise) {
+            return;
+        }
+
+        playPromise
+            .then(() => {
+                this.alpineStore.stageBlocked = false;
+            })
+            .catch(() => {
+                this.alpineStore.stageBlocked = true;
+            });
+    }
+
+    /** "Tap to play" affordance's click handler — a real user gesture, so
+     * the same play() call the browser silently refused in playStage()
+     * succeeds here. */
+    retryStagePlayback() {
+        this.playStage();
     }
 
     // ---- Tiles ------------------------------------------------------------

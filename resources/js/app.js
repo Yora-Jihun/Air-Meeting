@@ -14,6 +14,12 @@ document.addEventListener('alpine:init', () => {
         participantCount: 1,
         presenterId: null,
         presenterName: null,
+        // True when the browser blocked the stage video's autoplay (common
+        // for mobile/unengaged origins on unmuted video attached outside a
+        // click) — see RoomController.playStage(). Drives a "Tap to play"
+        // affordance instead of leaving viewers looking at a silently-black
+        // stage with no explanation.
+        stageBlocked: false,
         selfError: null,
         removedReason: null,
         selfJoinedAt: null,

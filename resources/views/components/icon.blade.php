@@ -26,6 +26,7 @@
         'chat' => '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z" />',
         'send' => '<path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" />',
         'chevron-down' => '<path d="m6 9 6 6 6-6" />',
+        'play' => '<path d="M7 4v16l13-8L7 4Z" />',
     ];
 @endphp
 

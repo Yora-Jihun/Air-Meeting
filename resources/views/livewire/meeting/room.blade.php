@@ -343,6 +343,30 @@
                                 x-ref="stageLabel"
                                 class="absolute left-3 top-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2.5 py-1 text-xs font-medium text-white"
                             ></span>
+
+                            {{-- The stage video has no `muted` attribute
+                                 (viewers should hear the presenter's shared
+                                 audio) and its srcObject is always attached
+                                 from an async WebSocket event, not a click —
+                                 exactly what browsers block autoplay for,
+                                 especially on mobile. When that happens the
+                                 video is left silently paused on a black
+                                 frame with no explanation; this gives
+                                 viewers an actual affordance, and the tap
+                                 itself is a real gesture so the retried
+                                 play() succeeds. --}}
+                            <button
+                                type="button"
+                                x-show="$store.room.stageBlocked"
+                                x-cloak
+                                @click="controller.retryStagePlayback()"
+                                class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 text-white transition hover:bg-black/60"
+                            >
+                                <span class="flex size-14 items-center justify-center rounded-full bg-white/15">
+                                    <x-icon name="play" class="size-6" aria-hidden="true" />
+                                </span>
+                                <span class="text-sm font-medium">Tap to play presentation</span>
+                            </button>
                         </div>
                     </div>
 
