@@ -16,6 +16,17 @@
         <title>{{ $title ?? config('app.name') }}</title>
         <meta name="description" content="{{ $description ?? 'Create a meeting, share the link, and talk face to face. Camera, microphone, screen sharing, and chat, right in the browser — no accounts, no downloads.' }}">
 
+        {{-- Same mark as the header's own logo (x-icon name="video", brand-500
+             on the app's dark background) — just baked into a standalone
+             square glyph, since a favicon has no room for the wordmark next
+             to it. SVG first (what modern browsers actually use); the PNGs
+             exist only for contexts that don't support SVG favicons, e.g.
+             iOS "add to home screen" and older browser tab icons. --}}
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+        <link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32">
+        <link rel="icon" href="/favicon-192x192.png" type="image/png" sizes="192x192">
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
         @vite(['resources/css/app.css', 'resources/js/app.js'])
 
         @livewireStyles
