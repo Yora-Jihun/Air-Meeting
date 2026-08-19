@@ -1,14 +1,21 @@
-// Public STUN always; TURN only if VITE_TURN_URL is configured (see
+// Public STUN always; TURN only if VITE_TURN_URLS is configured (see
 // .env.example). Without a TURN relay, this mesh cannot connect any pair
 // where at least one side is behind a symmetric NAT or restrictive
 // firewall — STUN alone isn't enough there, no matter how the rest of the
-// signaling is implemented. Point these at a coturn instance (or a hosted
-// TURN provider) before relying on this outside trusted/local networks.
+// signaling is implemented.
+//
+// VITE_TURN_URLS is a comma-separated list, not a single URL: a TURN
+// provider is typically reached over several transports (UDP, TCP, and
+// TLS-over-TCP on port 443, which is what gets through a firewall that
+// blocks everything else because it looks like ordinary HTTPS) sharing one
+// username/credential — offering all of them as one ICE server's `urls`
+// array lets the browser pick whichever one actually gets through on a
+// given network, instead of only ever trying one and giving up.
 const ICE_SERVERS = [
     { urls: 'stun:stun.l.google.com:19302' },
-    ...(import.meta.env.VITE_TURN_URL
+    ...(import.meta.env.VITE_TURN_URLS
         ? [{
-            urls: import.meta.env.VITE_TURN_URL,
+            urls: import.meta.env.VITE_TURN_URLS.split(',').map((url) => url.trim()),
             username: import.meta.env.VITE_TURN_USERNAME,
             credential: import.meta.env.VITE_TURN_CREDENTIAL,
         }]
