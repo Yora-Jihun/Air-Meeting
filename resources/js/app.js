@@ -11,6 +11,7 @@ document.addEventListener('alpine:init', () => {
         micOn: true,
         camOn: true,
         speaking: false,
+        handRaised: false,
         participantCount: 1,
         presenterId: null,
         presenterName: null,

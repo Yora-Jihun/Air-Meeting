@@ -27,7 +27,7 @@ export class SignalingClient {
     join({
         onHere, onJoining, onLeaving, onSignal, onPresentation,
         onMediaState, onSpeaking, onChat, onKicked, onMeetingEnded, onHostPromoted,
-        onResyncRequest,
+        onResyncRequest, onHandRaised,
     }) {
         this.channel = window.Echo.join(`meeting.${this.meetingUuid}`)
             .here((members) => onHere(members.filter((m) => m.id !== this.participantId)))
@@ -63,6 +63,15 @@ export class SignalingClient {
             .listenForWhisper('speaking', (payload) => {
                 if (payload.from !== this.participantId) {
                     onSpeaking(payload);
+                }
+            })
+            // Raise Hand — an explicit request-to-speak signal, same
+            // ephemeral whisper treatment as mic/cam/speaking: nobody
+            // needs to know a hand was raised an hour ago after they
+            // refresh, only that it's raised right now.
+            .listenForWhisper('hand-raised', (payload) => {
+                if (payload.from !== this.participantId) {
+                    onHandRaised(payload);
                 }
             })
             // Chat: a real broadcast (see App\Events\ChatMessageSent), not a
@@ -112,6 +121,11 @@ export class SignalingClient {
     /** Broadcast a speaking/not-speaking transition (called on change only, not per-sample). */
     announceSpeaking(speaking) {
         this.channel?.whisper('speaking', { from: this.participantId, speaking });
+    }
+
+    /** Broadcast a raised/lowered hand to every other participant instantly. */
+    announceHandRaised(raised) {
+        this.channel?.whisper('hand-raised', { from: this.participantId, raised });
     }
 
     /** Ask every other participant to re-announce their current media/presentation state. */

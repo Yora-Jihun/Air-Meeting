@@ -27,9 +27,11 @@ class ParticipantService
             'participant_id' => $participantId,
         ]);
 
+        $becomesHost = $isHost || $participant->is_host;
+
         $participant->fill([
             'display_name' => $displayName,
-            'is_host' => $isHost || $participant->is_host,
+            'is_host' => $becomesHost,
             'joined_at' => now(),
             'last_seen_at' => now(),
             'left_at' => null,
@@ -37,7 +39,36 @@ class ParticipantService
         $participant->meeting_id = $meeting->id;
         $participant->save();
 
+        if ($becomesHost) {
+            $this->demoteOtherHosts($meeting, $participant);
+        }
+
         return $participant;
+    }
+
+    /**
+     * Enforces "at most one active host" whenever a join grants host
+     * status — either a fresh host-token match, or a rejoining row that
+     * already carried it from before. Needed because promoteNextHost()
+     * (below) can hand host status to a temporary successor while the
+     * real host is away; if that real host later rejoins — even under a
+     * different display name, which is a brand new participant row, still
+     * carrying their session's host_token — nothing else would ever
+     * demote the successor, leaving two hosts active at once.
+     */
+    private function demoteOtherHosts(Meeting $meeting, Participant $keep): void
+    {
+        $stillHost = $meeting->activeParticipants()
+            ->where('id', '!=', $keep->id)
+            ->where('is_host', true);
+
+        if (! $stillHost->exists()) {
+            return;
+        }
+
+        $stillHost->update(['is_host' => false]);
+
+        $this->broadcastQuietly(new HostPromoted($meeting->uuid, $keep->participant_id));
     }
 
     public function leave(Meeting $meeting, string $participantId): void

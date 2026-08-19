@@ -17,10 +17,11 @@ let activeController = null;
 const BADGE_ICONS = {
     'mic-off': '<rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0 0 14 0" /><line x1="12" y1="17" x2="12" y2="21" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="2" y1="2" x2="22" y2="22" />',
     'video-off': '<rect x="3" y="6" width="13" height="12" rx="3" /><path d="M16 10.5 21 7v10l-5-3.5Z" /><line x1="2" y1="3" x2="22" y2="21" />',
+    'hand': '<path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" /><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" /><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" /><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />',
 };
 
-function badgeSvg(name) {
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="size-3">${BADGE_ICONS[name]}</svg>`;
+function badgeSvg(name, sizeClass = 'size-3') {
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="${sizeClass}">${BADGE_ICONS[name]}</svg>`;
 }
 
 /**
@@ -110,6 +111,7 @@ export class RoomController {
             onMeetingEnded: () => this.handleRemoved('The host ended this meeting.'),
             onHostPromoted: (payload) => this.handleHostPromoted(payload.participant_id),
             onResyncRequest: () => this.announceOwnState(),
+            onHandRaised: (payload) => this.handleHandRaised(payload.from, payload.raised),
         });
 
         // A backgrounded mobile tab can leave the WebSocket looking
@@ -196,6 +198,7 @@ export class RoomController {
                 isHost: member.is_host ?? false,
                 micOn: true,
                 camOn: true,
+                handRaised: false,
             },
         };
         this.alpineStore.participantCount = this.peers.size + 1;
@@ -293,13 +296,17 @@ export class RoomController {
     /**
      * Re-broadcasts everything about this client that only ever traveled
      * as a whisper (never persisted, never replayed by Reverb) — current
-     * mic/cam state and, if applicable, that this client is presenting.
-     * Used both for a normal late joiner (onJoining) and for a resync
-     * request from a peer that suspects it missed something (see
-     * signaling.js's requestResync()).
+     * mic/cam state, raised-hand state, and, if applicable, that this
+     * client is presenting. Used both for a normal late joiner
+     * (onJoining) and for a resync request from a peer that suspects it
+     * missed something (see signaling.js's requestResync()).
      */
     announceOwnState() {
         this.signaling.announceMediaState(this.alpineStore.micOn, this.alpineStore.camOn);
+
+        if (this.alpineStore.handRaised) {
+            this.signaling.announceHandRaised(true);
+        }
 
         if (this.screenStream) {
             this.signaling.announcePresentation(true, this.displayName);
@@ -322,6 +329,29 @@ export class RoomController {
 
     handleSpeaking(peerId, speaking) {
         this.setTileSpeaking(peerId, speaking);
+    }
+
+    /** A peer raised or lowered their hand — update the sidebar entry and their tile badge. */
+    handleHandRaised(peerId, raised) {
+        if (! this.alpineStore.peers[peerId]) {
+            return;
+        }
+
+        this.alpineStore.peers = {
+            ...this.alpineStore.peers,
+            [peerId]: { ...this.alpineStore.peers[peerId], handRaised: raised },
+        };
+
+        this.setTileHandRaised(peerId, raised);
+    }
+
+    /** The footer's Raise Hand button — a plain toggle, not tied to mic/cam
+     * or speaking state; the participant (or the host, once acknowledged)
+     * lowers it explicitly rather than it clearing itself automatically. */
+    toggleHand() {
+        this.alpineStore.handRaised = ! this.alpineStore.handRaised;
+        this.setTileHandRaised(this.participantId, this.alpineStore.handRaised);
+        this.signaling.announceHandRaised(this.alpineStore.handRaised);
     }
 
     /** A persisted chat message arrived via App\Events\ChatMessageSent —
@@ -540,7 +570,22 @@ export class RoomController {
         status.className = 'absolute bottom-2 right-2 flex items-center gap-1';
         status.append(micBadge);
 
-        wrapper.append(video, label, status);
+        // Top-left, not grouped with the mic badge: the kick button (below)
+        // already claims top-right, and a raised hand is meant to draw the
+        // eye rather than blend in with the other status icons — the same
+        // reason Zoom/Meet render it in their own idiomatic yellow instead
+        // of matching everything else. Sized and animated well past the
+        // other (passive-state) badges on purpose: a raised hand is a
+        // request waiting on someone, not just background status, so it
+        // needs to actually win the eye's attention when scanning a grid
+        // of tiles — a same-size static icon the same shade as everything
+        // else didn't. The ring gives it a crisp edge against whatever's
+        // playing in the video behind it, on any tile.
+        const handBadge = document.createElement('span');
+        handBadge.className = 'hidden absolute left-2 top-2 size-9 items-center justify-center rounded-full bg-amber-400 text-slate-900 ring-2 ring-slate-900 animate-pulse';
+        handBadge.innerHTML = badgeSvg('hand', 'size-5');
+
+        wrapper.append(video, label, status, handBadge);
 
         if (this.isHost && ! isSelf && this.onKick) {
             const kick = document.createElement('button');
@@ -555,7 +600,7 @@ export class RoomController {
 
         this.elements.grid.appendChild(wrapper);
 
-        return { wrapper, video, label, micBadge, remove: () => wrapper.remove() };
+        return { wrapper, video, label, micBadge, handBadge, remove: () => wrapper.remove() };
     }
 
     tileFor(id) {
@@ -575,6 +620,17 @@ export class RoomController {
 
         tile.micBadge.classList.toggle('hidden', micOn);
         tile.micBadge.classList.toggle('flex', ! micOn);
+    }
+
+    setTileHandRaised(id, raised) {
+        const tile = this.tileFor(id);
+
+        if (! tile) {
+            return;
+        }
+
+        tile.handBadge.classList.toggle('hidden', ! raised);
+        tile.handBadge.classList.toggle('flex', raised);
     }
 
     setTileSpeaking(id, speaking) {
@@ -608,29 +664,36 @@ export class RoomController {
     }
 
     /**
-     * ParticipantService::promoteNextHost() already updated the database
-     * before this ever arrives — this is just telling every open tab about
-     * it. For everyone else, updating the peers store is enough to flip
-     * that participant's "Host" badge live. For the newly-promoted
-     * participant's own tab, a badge update isn't enough: host status also
-     * unlocks server-rendered UI (room.blade.php's @if($isHost) blocks —
-     * Lock/End Meeting) and this.isHost here, both fixed once and for all
-     * by a reload rather than trying to patch every layer (Blade, Alpine,
-     * already-rendered video tiles) individually.
+     * The database is always the one already correct here — either
+     * ParticipantService::promoteNextHost() (a departing host's successor)
+     * or demoteOtherHosts() (the real host reclaiming the role, demoting
+     * that temporary successor) ran before this ever arrives, and there is
+     * now exactly one active host. This is just telling every open tab.
+     *
+     * Gaining host needs a reload: it unlocks server-rendered UI
+     * (room.blade.php's @if($isHost) blocks — Lock/End Meeting) and
+     * this.isHost here, both only ever set at mount. Losing it needs one
+     * too, for the same reason in reverse — without it, someone who just
+     * got demoted would keep their Lock/End Meeting controls (and their
+     * kick button on every tile) live and functional, even though the
+     * server would now reject those actions. Everyone else just gets
+     * their peers store corrected, clearing the badge off whoever used to
+     * be host — there is never more than one now.
      */
     handleHostPromoted(participantId) {
-        if (participantId === this.participantId) {
+        if (participantId === this.participantId || this.isHost) {
             window.location.reload();
 
             return;
         }
 
-        if (this.alpineStore.peers[participantId]) {
-            this.alpineStore.peers = {
-                ...this.alpineStore.peers,
-                [participantId]: { ...this.alpineStore.peers[participantId], isHost: true },
-            };
-        }
+        const peers = { ...this.alpineStore.peers };
+
+        Object.keys(peers).forEach((id) => {
+            peers[id] = { ...peers[id], isHost: id === participantId };
+        });
+
+        this.alpineStore.peers = peers;
     }
 
     stop() {

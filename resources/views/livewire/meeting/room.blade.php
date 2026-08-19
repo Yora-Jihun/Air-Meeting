@@ -198,6 +198,7 @@
                                             <span class="block text-xs text-slate-400" x-text="statusText(p)"></span>
                                         </span>
                                         <span class="flex shrink-0 items-center gap-1">
+                                            <x-icon name="hand" class="size-3.5 text-amber-400" x-show="p.handRaised" aria-label="Hand raised" />
                                             <x-icon name="mic-off" class="size-3.5 text-red-400" x-show="! p.micOn" aria-label="Muted" />
                                             <x-icon name="video-off" class="size-3.5 text-red-400" x-show="! p.camOn" x-cloak aria-label="Camera off" />
                                         </span>
@@ -511,6 +512,16 @@
                 >
                     <x-icon name="screen-share" class="size-5" />
                     <span class="hidden sm:inline" aria-hidden="true" x-text="$store.room.presenterId === controller.participantId ? 'Stop presenting' : 'Present'"></span>
+                </button>
+
+                <button
+                    @click="controller.toggleHand()"
+                    :aria-pressed="$store.room.handRaised"
+                    :aria-label="$store.room.handRaised ? 'Lower hand' : 'Raise hand'"
+                    class="flex size-11 shrink-0 items-center justify-center rounded-full transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+                    :class="$store.room.handRaised ? 'bg-amber-400 text-slate-900 hover:bg-amber-300' : 'bg-white/10 text-slate-200 hover:bg-white/15'"
+                >
+                    <x-icon name="hand" class="size-5" />
                 </button>
 
                 <button
