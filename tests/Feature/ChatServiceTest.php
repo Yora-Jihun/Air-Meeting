@@ -28,6 +28,15 @@ class ChatServiceTest extends TestCase
         ]);
     }
 
+    public function test_send_strips_html_from_the_message(): void
+    {
+        $meeting = Meeting::factory()->create();
+
+        $message = app(ChatService::class)->send($meeting, (string) Str::uuid(), 'Alice', '<script>alert(1)</script>hello');
+
+        $this->assertSame('alert(1)hello', $message->message);
+    }
+
     public function test_send_ignores_a_blank_message(): void
     {
         $meeting = Meeting::factory()->create();

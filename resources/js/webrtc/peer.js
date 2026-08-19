@@ -1,7 +1,19 @@
-// Public STUN only. Behind restrictive/symmetric NATs this mesh will fail
-// to connect some pairs — see the deployment notes for adding a TURN
-// server (coturn) before relying on this outside trusted networks.
-const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+// Public STUN always; TURN only if VITE_TURN_URL is configured (see
+// .env.example). Without a TURN relay, this mesh cannot connect any pair
+// where at least one side is behind a symmetric NAT or restrictive
+// firewall — STUN alone isn't enough there, no matter how the rest of the
+// signaling is implemented. Point these at a coturn instance (or a hosted
+// TURN provider) before relying on this outside trusted/local networks.
+const ICE_SERVERS = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    ...(import.meta.env.VITE_TURN_URL
+        ? [{
+            urls: import.meta.env.VITE_TURN_URL,
+            username: import.meta.env.VITE_TURN_USERNAME,
+            credential: import.meta.env.VITE_TURN_CREDENTIAL,
+        }]
+        : []),
+];
 
 /**
  * One RTCPeerConnection per remote participant, implementing the "perfect
@@ -30,6 +42,7 @@ export class Peer {
         // being dropped — the standard fix for this in every perfect
         // negotiation reference implementation.
         this.pendingCandidates = [];
+        this.disconnectTimer = null;
 
         this.connection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
         this.senders = new Map(); // track.kind/id -> RTCRtpSender, for later replaceTrack/removeTrack
@@ -61,8 +74,47 @@ export class Peer {
         };
 
         this.connection.onconnectionstatechange = () => {
-            onConnectionStateChange?.(this.connection.connectionState);
+            const state = this.connection.connectionState;
+            onConnectionStateChange?.(state);
+
+            // 'disconnected' is often a transient blip (brief packet loss, a
+            // wifi handoff) that ICE resolves on its own within a couple of
+            // seconds — restarting immediately on it would fire far more
+            // renegotiations than necessary. 'failed' is ICE giving up for
+            // good, so that one restarts right away; 'disconnected' only
+            // escalates to a restart if it's still stuck after a grace
+            // period, same threshold either way.
+            if (state === 'failed') {
+                clearTimeout(this.disconnectTimer);
+                this.restartIce();
+            } else if (state === 'disconnected') {
+                clearTimeout(this.disconnectTimer);
+                this.disconnectTimer = setTimeout(() => {
+                    if (this.connection.connectionState === 'disconnected') {
+                        this.restartIce();
+                    }
+                }, 3000);
+            } else {
+                clearTimeout(this.disconnectTimer);
+            }
         };
+    }
+
+    /**
+     * Renegotiates with fresh ICE credentials without tearing down the
+     * connection — the standard recovery for a connection that dropped due
+     * to a network change rather than either side actually leaving.
+     * restartIce() fires `negotiationneeded` per spec, which the handler
+     * above already turns into an offer sent down the same signaling path
+     * as any other renegotiation (e.g. adding a screen-share track), so no
+     * separate offer/answer handling is needed here.
+     */
+    restartIce() {
+        if (this.connection.connectionState === 'closed') {
+            return;
+        }
+
+        this.connection.restartIce();
     }
 
     async handleSignal({ description, candidate }) {
@@ -156,6 +208,7 @@ export class Peer {
     }
 
     close() {
+        clearTimeout(this.disconnectTimer);
         this.connection.close();
     }
 }

@@ -53,6 +53,7 @@ export class RoomController {
         this.screenStream = null;
         this.selfTile = null;
         this.store = null;
+        this.heartbeatTimer = null;
     }
 
     get alpineStore() {
@@ -89,6 +90,15 @@ export class RoomController {
                 // never saw our earlier announcements, so re-send current
                 // state whenever someone new shows up.
                 this.signaling.announceMediaState(this.alpineStore.micOn, this.alpineStore.camOn);
+
+                // Same problem for "who's presenting": without this, a late
+                // joiner's stage never activates (no showPresenter() call
+                // ever fires for them) even once connectTo() above gets
+                // them the actual screen-share track — the track alone
+                // doesn't drive the UI, this announcement does.
+                if (this.screenStream) {
+                    this.signaling.announcePresentation(true, this.displayName);
+                }
             },
             onLeaving: (member) => this.disconnectFrom(member.id),
             onSignal: (payload) => this.peers.get(payload.from)?.peer.handleSignal(payload),
@@ -98,6 +108,7 @@ export class RoomController {
             onChat: (payload) => this.handleChat(payload),
             onKicked: () => this.handleRemoved('You were removed from the meeting by the host.'),
             onMeetingEnded: () => this.handleRemoved('The host ended this meeting.'),
+            onHostPromoted: (payload) => this.handleHostPromoted(payload.participant_id),
         });
 
         this.signaling.announceMediaState(this.alpineStore.micOn, this.alpineStore.camOn);
@@ -109,6 +120,30 @@ export class RoomController {
         });
 
         this.alpineStore.connected = true;
+        this.startHeartbeat();
+    }
+
+    /**
+     * Tells the server this tab is still genuinely open, so
+     * app:prune-stale-participants can tell a closed/crashed tab apart
+     * from one that's mid-call — see ParticipantService::heartbeat() for
+     * why this (unlike the removed sendBeacon-on-pagehide attempt) can't
+     * misfire on a plain refresh: it only ever extends last_seen_at, never
+     * marks anyone as left, and simply resumes on the next tick either way.
+     */
+    startHeartbeat() {
+        const send = () => {
+            fetch(`/meet/${this.meetingUuid}/heartbeat`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+                    Accept: 'application/json',
+                },
+                keepalive: true,
+            }).catch(() => {});
+        };
+
+        this.heartbeatTimer = setInterval(send, 15_000);
     }
 
     connectTo(member) {
@@ -125,6 +160,19 @@ export class RoomController {
             onTrack: (stream) => this.handleRemoteTrack(member.id, stream),
             onConnectionStateChange: (state) => this.updatePeerState(member.id, state),
         });
+
+        // A screen share already in progress predates this connection —
+        // startPresenting() only ever reached peers that existed at the
+        // moment sharing began, so anyone connecting afterward (a late
+        // joiner, or this app's own reconnect on page reload) never gets
+        // the track added to their RTCPeerConnection any other way. Added
+        // before the tile/peer bookkeeping below so it rides the same
+        // initial negotiation as the camera track rather than triggering a
+        // second one.
+        if (this.screenStream) {
+            const screenTrack = this.screenStream.getVideoTracks()[0];
+            peer.addTrack(screenTrack, this.screenStream);
+        }
 
         const tile = this.createTile(member.id, member.name, false);
 
@@ -418,7 +466,12 @@ export class RoomController {
         // thumbnail (many-participant grid, presenter strip) reads as
         // disproportionately round next to the sharper corners everywhere
         // else. rounded-xl holds up at both ends of that size range.
-        wrapper.className = 'relative aspect-video overflow-hidden rounded-xl bg-slate-800 ring-1 ring-white/10 transition-all';
+        // ring-inset: a plain (non-inset) ring's box-shadow paints outside
+        // the tile's own border-box — outside overflow-hidden's clip, so it
+        // visually bled into the gap between tiles rather than reading as
+        // this tile's own border. Inset keeps it, and the speaking ring
+        // setTileSpeaking() swaps in, drawn on the inside edge instead.
+        wrapper.className = 'relative aspect-video overflow-hidden rounded-xl bg-slate-800 ring-1 ring-inset ring-white/10 transition-all';
         wrapper.dataset.peerId = id;
         // The <video> itself has no accessible content — the tile's
         // container carries the participant's name for screen readers,
@@ -440,13 +493,12 @@ export class RoomController {
         micBadge.className = 'hidden size-6 items-center justify-center rounded-full bg-red-500 text-white';
         micBadge.innerHTML = badgeSvg('mic-off');
 
-        const camBadge = document.createElement('span');
-        camBadge.className = 'hidden size-6 items-center justify-center rounded-full bg-red-500 text-white';
-        camBadge.innerHTML = badgeSvg('video-off');
-
+        // No camera-off badge: unlike mic state, a dead camera is already
+        // self-evident from the tile itself — there's just no picture — so
+        // a second icon saying the same thing was pure redundancy.
         const status = document.createElement('div');
         status.className = 'absolute bottom-2 right-2 flex items-center gap-1';
-        status.append(micBadge, camBadge);
+        status.append(micBadge);
 
         wrapper.append(video, label, status);
 
@@ -463,7 +515,7 @@ export class RoomController {
 
         this.elements.grid.appendChild(wrapper);
 
-        return { wrapper, video, label, micBadge, camBadge, remove: () => wrapper.remove() };
+        return { wrapper, video, label, micBadge, remove: () => wrapper.remove() };
     }
 
     tileFor(id) {
@@ -483,8 +535,6 @@ export class RoomController {
 
         tile.micBadge.classList.toggle('hidden', micOn);
         tile.micBadge.classList.toggle('flex', ! micOn);
-        tile.camBadge.classList.toggle('hidden', camOn);
-        tile.camBadge.classList.toggle('flex', ! camOn);
     }
 
     setTileSpeaking(id, speaking) {
@@ -517,7 +567,36 @@ export class RoomController {
         this.stop();
     }
 
+    /**
+     * ParticipantService::promoteNextHost() already updated the database
+     * before this ever arrives — this is just telling every open tab about
+     * it. For everyone else, updating the peers store is enough to flip
+     * that participant's "Host" badge live. For the newly-promoted
+     * participant's own tab, a badge update isn't enough: host status also
+     * unlocks server-rendered UI (room.blade.php's @if($isHost) blocks —
+     * Lock/End Meeting) and this.isHost here, both fixed once and for all
+     * by a reload rather than trying to patch every layer (Blade, Alpine,
+     * already-rendered video tiles) individually.
+     */
+    handleHostPromoted(participantId) {
+        if (participantId === this.participantId) {
+            window.location.reload();
+
+            return;
+        }
+
+        if (this.alpineStore.peers[participantId]) {
+            this.alpineStore.peers = {
+                ...this.alpineStore.peers,
+                [participantId]: { ...this.alpineStore.peers[participantId], isHost: true },
+            };
+        }
+    }
+
     stop() {
+        clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = null;
+
         this.peers.forEach(({ peer, tile }) => {
             peer.close();
             tile?.remove();

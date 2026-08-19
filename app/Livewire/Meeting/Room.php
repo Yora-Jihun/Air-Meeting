@@ -7,6 +7,7 @@ use App\Models\Participant;
 use App\Services\ChatService;
 use App\Services\MeetingService;
 use App\Services\ParticipantService;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -112,6 +113,20 @@ class Room extends Component
         if (! $this->hasJoined) {
             return;
         }
+
+        // Keyed by the server-known participant id (set at join, not
+        // client input), so it can't be dodged by just resending with a
+        // different claimed identity the way an IP-based key could be
+        // via a shared connection. Silent drop, not an error: this is
+        // flood protection, not a quota anyone should ever bump into in
+        // normal conversation (10 messages/10s).
+        $rateLimitKey = "chat:{$this->participantId}";
+
+        if (RateLimiter::tooManyAttempts($rateLimitKey, maxAttempts: 10)) {
+            return;
+        }
+
+        RateLimiter::hit($rateLimitKey, decaySeconds: 10);
 
         $chat->send(
             $this->meeting,

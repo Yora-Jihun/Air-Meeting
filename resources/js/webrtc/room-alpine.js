@@ -40,6 +40,21 @@ export function meetingRoom({ meetingUuid, participantId, displayName, joinedAt,
         // that redirect (see leaveCall()/endMeeting() below).
         leaving: false,
         endingMeeting: false,
+        stageIsFullscreen: false,
+
+        /** Fullscreens the stage wrapper (not just the <video>) so the
+         * presenter label and this button's own overlay stay visible and
+         * usable while fullscreen, instead of handing the whole screen to
+         * a bare video element with no controls. */
+        toggleStageFullscreen() {
+            if (document.fullscreenElement) {
+                document.exitFullscreen?.();
+
+                return;
+            }
+
+            this.$refs.stage?.requestFullscreen?.();
+        },
 
         participantsList() {
             const peers = Object.entries(this.$store.room.peers).map(([id, p]) => ({
@@ -87,24 +102,37 @@ export function meetingRoom({ meetingUuid, participantId, displayName, joinedAt,
 
         gridColsClass() {
             if (this.$store.room.presenterId) {
-                // Unlike the cases below, this was a flat 110-140px minimum
-                // regardless of viewport — fine on desktop, but on a narrow
-                // phone that only leaves room for ~2 oversized thumbnails
-                // per row while the presentation is meant to dominate.
-                // Scaling the floor down with vw keeps it a genuine
-                // thumbnail strip on small screens too.
-                return 'grid-cols-[repeat(auto-fill,minmax(min(26vw,110px),140px))]';
+                // Mobile: a fixed 2-up grid, no scrolling — matches Meet's
+                // own mobile screen-share layout (2 visible tiles + a "+N
+                // others" badge over the second one, added in
+                // room.blade.php) rather than a scrollable filmstrip.
+                // Tiles beyond the first 2 are hidden outright (not just
+                // off-screen) so the row's height is exactly one row of
+                // real tiles, not an arbitrary fixed band.
+                //
+                // sm+: flips to a single, actually-scrollable vertical
+                // column beside the stage (see room.blade.php's <main>
+                // switching to flex-row here) — Meet/Zoom's desktop
+                // screen-share layout, where there's room to show everyone.
+                // auto-rows-max lets each tile's height follow from its own
+                // aspect-video ratio at the fixed column width.
+                return 'grid-cols-2 [&>*:nth-child(n+3)]:hidden sm:grid-flow-row sm:grid-cols-1 sm:auto-rows-max sm:[&>*:nth-child(n+3)]:block';
             }
 
             // Fewer faces means each one should actually fill the room
             // instead of floating small in a mostly empty canvas — a solo
             // call gets one big tile, a 1:1 call gets two large ones, and
-            // it steps back down to a compact thumbnail grid once there's
-            // a real crowd.
+            // it steps back down to a compact grid once there's a real
+            // crowd. Every floor is vw-scaled (not a flat px minimum) so a
+            // phone screen still gets 2+ columns instead of one giant tile
+            // per row forcing an extra-long scroll — matching how Zoom/Meet
+            // pack their mobile grid — while 1fr as the ceiling (not a
+            // fixed cap) lets tiles actually fill the row on wide screens
+            // instead of leaving dead space beside them.
             switch (this.$store.room.participantCount) {
                 case 1: return 'grid-cols-[minmax(280px,min(85vw,760px))]';
-                case 2: return 'grid-cols-[repeat(auto-fit,minmax(300px,min(46vw,560px)))]';
-                default: return 'grid-cols-[repeat(auto-fit,minmax(240px,360px))]';
+                case 2: return 'grid-cols-[repeat(auto-fit,minmax(min(46vw,300px),560px))]';
+                default: return 'grid-cols-[repeat(auto-fit,minmax(min(42vw,220px),1fr))]';
             }
         },
 
@@ -127,6 +155,14 @@ export function meetingRoom({ meetingUuid, participantId, displayName, joinedAt,
 
         async init() {
             this.startDurationTimer();
+
+            // Keeps the button's icon/label correct even when fullscreen is
+            // exited a way this component didn't initiate — the Esc key or
+            // the browser's own "exit fullscreen" affordance, not just a
+            // second click on this button.
+            document.addEventListener('fullscreenchange', () => {
+                this.stageIsFullscreen = document.fullscreenElement === this.$refs.stage;
+            });
 
             // The initial open/closed state above is only decided once, at
             // load. If the sidebar was open on a wide screen and the

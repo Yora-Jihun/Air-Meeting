@@ -26,6 +26,7 @@ class Participant extends Model implements AuthenticatableContract
         'is_muted',
         'is_camera_off',
         'joined_at',
+        'last_seen_at',
         'left_at',
     ];
 
@@ -36,6 +37,7 @@ class Participant extends Model implements AuthenticatableContract
             'is_muted' => 'boolean',
             'is_camera_off' => 'boolean',
             'joined_at' => 'datetime',
+            'last_seen_at' => 'datetime',
             'left_at' => 'datetime',
         ];
     }

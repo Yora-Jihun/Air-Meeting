@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Meeting;
+use App\Services\ParticipantService;
+use Illuminate\Http\Response;
 use Illuminate\View\View;
 
 class MeetingController extends Controller
@@ -31,5 +33,25 @@ class MeetingController extends Controller
         }
 
         return view('meeting.show', ['meeting' => $meeting]);
+    }
+
+    /**
+     * Polled every ~15s by room.js while a participant's tab is open. This
+     * only ever refreshes last_seen_at for the caller's own session
+     * participant — it never marks anyone as left — so unlike the removed
+     * pagehide/sendBeacon leave attempt (see MeetingPageTest's regression
+     * test), there's no way for a page refresh to be misread as a
+     * departure. Absence of heartbeats, not their presence, is what
+     * app:prune-stale-participants acts on.
+     */
+    public function heartbeat(Meeting $meeting, ParticipantService $participants): Response
+    {
+        $participantId = session("meeting.{$meeting->uuid}.participant_id");
+
+        if ($participantId) {
+            $participants->heartbeat($meeting, $participantId);
+        }
+
+        return response()->noContent();
     }
 }

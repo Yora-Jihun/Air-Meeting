@@ -129,4 +129,39 @@ class MeetingJoinTest extends TestCase
             ->call('join')
             ->assertSet('error', 'Incorrect meeting password.');
     }
+
+    public function test_repeated_wrong_passwords_are_rate_limited(): void
+    {
+        $meeting = Meeting::factory()->withPassword('letmein')->create();
+
+        for ($i = 1; $i <= 10; $i++) {
+            Livewire::test(Join::class, ['meeting' => $meeting, 'participantId' => (string) Str::uuid()])
+                ->set('displayName', "Guesser {$i}")
+                ->set('password', 'wrong')
+                ->call('join')
+                ->assertSet('error', 'Incorrect meeting password.');
+        }
+
+        // The 11th attempt is blocked by the rate limiter even though this
+        // one finally has the right password — the guessing itself is what
+        // gets shut down, not any one wrong guess.
+        Livewire::test(Join::class, ['meeting' => $meeting, 'participantId' => (string) Str::uuid()])
+            ->set('displayName', 'Guesser 11')
+            ->set('password', 'letmein')
+            ->call('join')
+            ->assertSet('error', 'Too many attempts. Please wait a minute and try again.')
+            ->assertNotDispatched('participant-joined');
+    }
+
+    public function test_repeated_successful_joins_to_an_open_meeting_are_never_rate_limited(): void
+    {
+        $meeting = Meeting::factory()->create(['max_participants' => 20]);
+
+        for ($i = 1; $i <= 15; $i++) {
+            Livewire::test(Join::class, ['meeting' => $meeting, 'participantId' => (string) Str::uuid()])
+                ->set('displayName', "Guest {$i}")
+                ->call('join')
+                ->assertDispatched('participant-joined');
+        }
+    }
 }

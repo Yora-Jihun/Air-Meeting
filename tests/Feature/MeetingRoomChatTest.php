@@ -66,6 +66,33 @@ class MeetingRoomChatTest extends TestCase
             ->assertSet('initialMessages.0.name', 'Alice');
     }
 
+    public function test_chat_flooding_is_rate_limited_after_ten_messages_in_ten_seconds(): void
+    {
+        $meeting = Meeting::factory()->create();
+        $participantId = (string) Str::uuid();
+
+        app(ParticipantService::class)->join($meeting, $participantId, 'Alice');
+
+        $this->withSession([
+            "meeting.{$meeting->uuid}.participant_id" => $participantId,
+            "meeting.{$meeting->uuid}.display_name" => 'Alice',
+        ]);
+
+        $room = Livewire::test(Room::class, ['meeting' => $meeting]);
+
+        for ($i = 1; $i <= 10; $i++) {
+            $room->call('sendChat', "message {$i}");
+        }
+
+        $this->assertDatabaseCount('chat_messages', 10);
+
+        // The 11th message within the same window is silently dropped —
+        // flood protection, not a user-facing error.
+        $room->call('sendChat', 'message 11');
+
+        $this->assertDatabaseCount('chat_messages', 10);
+    }
+
     public function test_joined_room_page_embeds_chat_history_for_alpine(): void
     {
         $meeting = Meeting::factory()->create();

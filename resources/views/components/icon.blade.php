@@ -14,7 +14,12 @@
         'lock-closed' => '<rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />',
         'lock-open' => '<rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 7.2-2.4" />',
         'users' => '<circle cx="9" cy="7" r="4" /><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" />',
-        'user-plus' => '<circle cx="9" cy="8" r="4" /><path d="M2 20c0-3.9 3.1-7 7-7s7 3.1 7 7" /><line x1="19" y1="8" x2="19" y2="14" /><line x1="16" y1="11" x2="22" y2="11" />',
+        // Lucide's own "user-plus" glyph verbatim, not a hand-tweaked
+        // variant — the "+" sits at bottom-right, clear of the head
+        // entirely, instead of crowding the temple the way a top-right
+        // plus does next to a face. A well-established, widely-recognized
+        // shape reads as more deliberate than an approximation of one.
+        'user-plus' => '<path d="M2 21a8 8 0 0 1 13.292-6" /><circle cx="10" cy="8" r="5" /><path d="M19 16v6" /><path d="M22 19h-6" />',
         'link' => '<path d="M9 15l6-6" /><path d="M11 6l1-1a3.5 3.5 0 0 1 5 5l-1 1" /><path d="M13 18l-1 1a3.5 3.5 0 0 1-5-5l1-1" />',
         'x-mark' => '<line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />',
         // A downward-pointing handset — the universal "hang up" glyph used
@@ -27,6 +32,8 @@
         'send' => '<path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" />',
         'chevron-down' => '<path d="m6 9 6 6 6-6" />',
         'play' => '<path d="M7 4v16l13-8L7 4Z" />',
+        'fullscreen-enter' => '<path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M21 8V5a2 2 0 0 0-2-2h-3" /><path d="M3 16v3a2 2 0 0 0 2 2h3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" />',
+        'fullscreen-exit' => '<path d="M8 3v3a2 2 0 0 1-2 2H3" /><path d="M21 8h-3a2 2 0 0 1-2-2V3" /><path d="M3 16h3a2 2 0 0 1 2 2v3" /><path d="M16 21v-3a2 2 0 0 1 2-2h3" />',
     ];
 @endphp
 

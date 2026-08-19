@@ -58,7 +58,7 @@
                         <x-button
                             @click="endMeeting()"
                             busy="endingMeeting"
-                            variant="danger-subtle"
+                            variant="secondary"
                             class="h-9 px-2.5 text-xs sm:px-3.5"
                             aria-label="End meeting for everyone"
                         >
@@ -118,7 +118,7 @@
                 </div>
             </header>
 
-            <div class="flex flex-1 overflow-hidden">
+            <div class="flex min-h-0 flex-1 overflow-hidden">
                 {{-- Mobile-only dimmed backdrop behind the sliding-in panel below. --}}
                 <div
                     x-show="sidebarOpen"
@@ -235,13 +235,15 @@
                         </div>
                     </template>
 
-                    {{-- Chat: whispered peer-to-peer over the same presence
-                         channel as mic/cam state and screen-share signals
-                         (see resources/js/webrtc/signaling.js) rather than
-                         stored server-side — nothing here survives a
-                         refresh or is visible to someone who joins late,
-                         matching the rest of this app's no-accounts,
-                         nothing-persisted-beyond-the-call posture. --}}
+                    {{-- Chat: persisted server-side (App\Services\ChatService)
+                         and broadcast as a real event (ChatMessageSent),
+                         unlike the mic/cam state and screen-share signals on
+                         this same presence channel, which are ephemeral
+                         whispers (see resources/js/webrtc/signaling.js). A
+                         message survives a refresh and reaches anyone who
+                         joins mid-call — history is seeded once via
+                         initialMessages (Room::mount()) and appended to live
+                         from there. --}}
                     <template x-if="sidebarTab === 'chat'">
                         <div class="flex flex-1 flex-col overflow-hidden">
                             <ul x-ref="chatList" class="flex-1 space-y-3 overflow-y-auto p-3" aria-label="Chat messages" aria-live="polite">
@@ -285,7 +287,18 @@
                     </template>
                 </aside>
 
-                <main class="relative flex flex-1 flex-col gap-3 overflow-hidden p-3 sm:p-6">
+                {{-- Column on mobile always; while presenting, sm+ switches to a
+                     row — stage on the left, the participant strip as a
+                     narrow column on the right, matching Meet/Zoom's desktop
+                     screen-share layout. Staying a column on mobile even
+                     while presenting is deliberate: a side-by-side split
+                     has no room to breathe on a phone-width screen, so that
+                     case keeps the bottom horizontal filmstrip instead (see
+                     the grid's own classes below). --}}
+                <main
+                    class="relative flex min-h-0 flex-1 gap-3 overflow-hidden p-3 sm:p-6"
+                    :class="$store.room.presenterId ? 'flex-col sm:flex-row' : 'flex-col'"
+                >
                     {{-- A true floating toast — positioned over the video area rather
                          than sitting in normal document flow, so it doesn't shove the
                          video down when it appears or leave a gap when it clears.
@@ -308,22 +321,33 @@
                             class="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center sm:top-4"
                             aria-live="polite"
                         >
-                            {{-- Stacked and centered on mobile so a long message (e.g. the
-                                 "no camera or microphone found" case) can wrap onto its own
-                                 line instead of squeezing against the button in one cramped
-                                 row; reverts to a single row once there's room for it. --}}
-                            <p class="pointer-events-auto flex w-[min(92vw,26rem)] flex-col items-center gap-2 rounded-xl border border-white/10 bg-slate-900/90 px-4 py-3 text-center text-xs text-amber-400 shadow-xl backdrop-blur-xl sm:w-auto sm:max-w-md sm:flex-row sm:text-left">
-                                <span class="flex items-center gap-2">
-                                    <x-icon name="alert" class="size-4 shrink-0" aria-hidden="true" />
-                                    <span x-text="$store.room.selfError"></span>
-                                </span>
+                            {{-- Fully neutral by design — no red/amber anywhere, just
+                                 tonal slate/white so it reads as informational rather
+                                 than alarming. sm:flex-1 + min-w-0 on the message group
+                                 gives the text priority over the button for the row's
+                                 width instead of both fighting a fixed-width container,
+                                 so the message wraps far less eagerly.
+
+                                 Mobile is a single card with an internal divider (border-t)
+                                 rather than two separately-boxed pieces floating in a gap —
+                                 the message keeps its own padding, the button becomes a
+                                 full-width footer strip flush with the card's own edges
+                                 (overflow-hidden clips its corners to match), which reads
+                                 as one integrated toast instead of a message-plus-button
+                                 stack. sm+ reverts to a single row with the button back to
+                                 a compact inline pill beside the message. --}}
+                            <div class="pointer-events-auto w-[min(92vw,34rem)] overflow-hidden rounded-xl border border-white/10 bg-slate-900/95 text-left shadow-xl backdrop-blur-xl sm:flex sm:w-auto sm:max-w-xl sm:items-center sm:gap-4 sm:p-4">
+                                <div class="flex items-start justify-center gap-2.5 p-4 sm:min-w-0 sm:flex-1 sm:items-center sm:justify-start sm:p-0">
+                                    <x-icon name="alert" class="size-4 shrink-0 text-slate-300" aria-hidden="true" />
+                                    <span class="text-xs leading-relaxed text-slate-200" x-text="$store.room.selfError"></span>
+                                </div>
                                 <button
                                     @click="retryMedia()"
-                                    class="shrink-0 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 sm:ml-1 sm:py-1"
+                                    class="block w-full border-t border-white/10 px-4 py-2.5 text-xs font-medium text-slate-200 transition hover:bg-white/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 sm:ml-1 sm:w-auto sm:shrink-0 sm:rounded-lg sm:border-0 sm:bg-white/10 sm:px-3 sm:py-1.5 sm:hover:bg-white/15"
                                 >
                                     Allow access
                                 </button>
-                            </p>
+                            </div>
                         </div>
                     </template>
 
@@ -336,13 +360,23 @@
                          this component (e.g. the host clicking Lock) morphs this
                          subtree back to its always-empty server markup, silently
                          losing the live video mid-call. --}}
-                    <div wire:ignore x-ref="stage" class="hidden min-h-0 flex-1 overflow-hidden rounded-xl border border-white/10 bg-black">
+                    <div wire:ignore x-ref="stage" class="hidden min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-white/10 bg-black">
                         <div class="relative h-full w-full">
                             <video x-ref="stageVideo" autoplay playsinline class="h-full w-full object-contain"></video>
                             <span
                                 x-ref="stageLabel"
                                 class="absolute left-3 top-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2.5 py-1 text-xs font-medium text-white"
                             ></span>
+
+                            <button
+                                type="button"
+                                @click="toggleStageFullscreen()"
+                                :aria-label="stageIsFullscreen ? 'Exit full screen' : 'Full screen'"
+                                class="absolute right-3 top-3 flex size-8 items-center justify-center rounded-lg bg-black/60 text-white transition hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+                            >
+                                <x-icon name="fullscreen-exit" class="size-4" x-show="stageIsFullscreen" />
+                                <x-icon name="fullscreen-enter" class="size-4" x-show="! stageIsFullscreen" x-cloak />
+                            </button>
 
                             {{-- The stage video has no `muted` attribute
                                  (viewers should hear the presenter's shared
@@ -386,8 +420,8 @@
                          text-center), so the visual result is unchanged for the
                          single-tile case that was already working. --}}
                     <div
-                        class="flex min-h-0 flex-col gap-3"
-                        :class="$store.room.presenterId ? 'flex-none' : 'flex-1 justify-center'"
+                        class="relative flex min-h-0 min-w-0 flex-col gap-3"
+                        :class="$store.room.presenterId ? 'flex-none sm:w-72 sm:shrink-0 lg:w-80 xl:w-96' : 'flex-1 overflow-y-auto [justify-content:safe_center]'"
                     >
                         {{-- Participant thumbnails. RoomController appends/removes tiles
                              here directly. auto-fit + centered tracks means a lone
@@ -413,8 +447,24 @@
                             role="list"
                             aria-label="Video feeds"
                             class="grid justify-center gap-3"
-                            :class="[gridColsClass(), $store.room.presenterId ? 'max-h-20 overflow-y-auto sm:max-h-28' : '']"
+                            :class="[gridColsClass(), $store.room.presenterId ? 'overflow-hidden sm:h-full sm:w-full sm:overflow-y-auto' : '']"
                         ></div>
+
+                        {{-- Mobile only (sm:hidden) — the desktop column to
+                             the side has room to scroll through everyone
+                             instead of needing this. Landing exactly on the
+                             second tile's top-right corner isn't a
+                             coincidence: with the fixed 2-up grid above and
+                             the rest of the tiles hidden outright (not just
+                             scrolled out of view), this wrapper's own
+                             top-right corner IS that tile's top-right
+                             corner. --}}
+                        <span
+                            x-show="$store.room.presenterId && $store.room.participantCount > 2"
+                            x-cloak
+                            x-text="'+' + ($store.room.participantCount - 2) + ' others'"
+                            class="pointer-events-none absolute right-2 top-2 z-10 rounded-full bg-black/60 px-2.5 py-1 text-xs font-medium text-white sm:hidden"
+                        ></span>
 
                         <p
                             x-show="$store.room.participantCount === 1 && ! $store.room.presenterId"

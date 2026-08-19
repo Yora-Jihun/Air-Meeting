@@ -26,7 +26,7 @@ export class SignalingClient {
 
     join({
         onHere, onJoining, onLeaving, onSignal, onPresentation,
-        onMediaState, onSpeaking, onChat, onKicked, onMeetingEnded,
+        onMediaState, onSpeaking, onChat, onKicked, onMeetingEnded, onHostPromoted,
     }) {
         this.channel = window.Echo.join(`meeting.${this.meetingUuid}`)
             .here((members) => onHere(members.filter((m) => m.id !== this.participantId)))
@@ -74,7 +74,8 @@ export class SignalingClient {
                     onKicked();
                 }
             })
-            .listen('.meeting.ended', () => onMeetingEnded());
+            .listen('.meeting.ended', () => onMeetingEnded())
+            .listen('.host.promoted', (event) => onHostPromoted(event));
 
         return this.channel;
     }

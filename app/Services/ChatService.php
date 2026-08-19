@@ -19,7 +19,13 @@ class ChatService
 
     public function send(Meeting $meeting, string $participantId, string $displayName, string $message): ?ChatMessage
     {
-        $message = trim($message);
+        // Defended at rest here, the same way Join::join() strips display
+        // names, not just at the one place that currently renders it
+        // (Alpine's x-text, which auto-escapes). Whoever reads chat next —
+        // an export, an admin view, a future server-rendered transcript —
+        // shouldn't inherit raw HTML just because today's only consumer
+        // happens to be safe.
+        $message = trim(strip_tags($message));
 
         if ($message === '') {
             return null;

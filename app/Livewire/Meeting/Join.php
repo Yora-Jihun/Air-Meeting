@@ -6,6 +6,7 @@ use App\Exceptions\MeetingUnavailableException;
 use App\Models\Meeting;
 use App\Services\MeetingService;
 use App\Services\ParticipantService;
+use Illuminate\Support\Facades\RateLimiter;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
 
@@ -48,13 +49,33 @@ class Join extends Component
             return;
         }
 
+        // Only wrong-password guesses count against this — never a locked,
+        // full, or expired meeting — so a burst of real guests joining an
+        // *open* meeting from a shared office IP is never at risk of
+        // tripping it. Scoped per meeting, not globally per IP, so one
+        // locked-down meeting can't exhaust an attacker's budget against
+        // every other meeting on the server.
+        $rateLimitKey = "meeting-password:{$this->meeting->uuid}:".request()->ip();
+
+        if (RateLimiter::tooManyAttempts($rateLimitKey, maxAttempts: 10)) {
+            $this->error = 'Too many attempts. Please wait a minute and try again.';
+
+            return;
+        }
+
         try {
             $meeting = $meetings->findJoinable($this->meeting->uuid, $this->password);
         } catch (MeetingUnavailableException $e) {
+            if ($e->reason === 'invalid_password') {
+                RateLimiter::hit($rateLimitKey, decaySeconds: 60);
+            }
+
             $this->error = $e->getMessage();
 
             return;
         }
+
+        RateLimiter::clear($rateLimitKey);
 
         $isHost = $meeting->isHost(session("meeting.{$meeting->uuid}.host_token"));
 

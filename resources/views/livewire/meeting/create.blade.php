@@ -20,7 +20,7 @@
                 wire:model="title"
                 maxlength="100"
                 placeholder="Weekly team sync"
-                class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-brand-500 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-brand-400"
+                    class="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-brand-500 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-brand-400"
             >
             @error('title') <p class="mt-1 text-xs text-red-400">{{ $message }}</p> @enderror
         </div>
