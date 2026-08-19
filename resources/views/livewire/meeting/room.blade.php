@@ -373,7 +373,7 @@
                                 type="button"
                                 @click="toggleStageFullscreen()"
                                 :aria-label="stageIsFullscreen ? 'Exit full screen' : 'Full screen'"
-                                class="absolute right-3 top-3 flex size-8 items-center justify-center rounded-lg bg-black/60 text-white transition hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+                                class="absolute bottom-3 right-3 flex size-8 items-center justify-center rounded-lg bg-black/60 text-white transition hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
                             >
                                 <x-icon name="fullscreen-exit" class="size-4" x-show="stageIsFullscreen" />
                                 <x-icon name="fullscreen-enter" class="size-4" x-show="! stageIsFullscreen" x-cloak />
