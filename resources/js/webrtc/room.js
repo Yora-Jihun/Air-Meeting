@@ -54,6 +54,15 @@ export class RoomController {
         this.selfTile = null;
         this.store = null;
         this.heartbeatTimer = null;
+
+        // Bound once here (not inline in start()) so the exact same
+        // function reference can be passed to both addEventListener and,
+        // in stop(), removeEventListener.
+        this.handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                this.signaling.requestResync();
+            }
+        };
     }
 
     get alpineStore() {
@@ -89,16 +98,7 @@ export class RoomController {
                 // Whispers aren't replayed — a member who joins after us
                 // never saw our earlier announcements, so re-send current
                 // state whenever someone new shows up.
-                this.signaling.announceMediaState(this.alpineStore.micOn, this.alpineStore.camOn);
-
-                // Same problem for "who's presenting": without this, a late
-                // joiner's stage never activates (no showPresenter() call
-                // ever fires for them) even once connectTo() above gets
-                // them the actual screen-share track — the track alone
-                // doesn't drive the UI, this announcement does.
-                if (this.screenStream) {
-                    this.signaling.announcePresentation(true, this.displayName);
-                }
+                this.announceOwnState();
             },
             onLeaving: (member) => this.disconnectFrom(member.id),
             onSignal: (payload) => this.peers.get(payload.from)?.peer.handleSignal(payload),
@@ -109,7 +109,17 @@ export class RoomController {
             onKicked: () => this.handleRemoved('You were removed from the meeting by the host.'),
             onMeetingEnded: () => this.handleRemoved('The host ended this meeting.'),
             onHostPromoted: (payload) => this.handleHostPromoted(payload.participant_id),
+            onResyncRequest: () => this.announceOwnState(),
         });
+
+        // A backgrounded mobile tab can leave the WebSocket looking
+        // "connected" from the JS side while the OS has actually paused it
+        // — no error, no disconnect event, just silently missed whispers
+        // until something asks again. Coming back to the foreground is the
+        // one moment we can reliably detect client-side, so it's also the
+        // moment to ask everyone (including this tab, via the same
+        // broadcast) to resend what they currently are.
+        document.addEventListener('visibilitychange', this.handleVisibilityChange);
 
         this.signaling.announceMediaState(this.alpineStore.micOn, this.alpineStore.camOn);
 
@@ -280,6 +290,22 @@ export class RoomController {
         }
     }
 
+    /**
+     * Re-broadcasts everything about this client that only ever traveled
+     * as a whisper (never persisted, never replayed by Reverb) — current
+     * mic/cam state and, if applicable, that this client is presenting.
+     * Used both for a normal late joiner (onJoining) and for a resync
+     * request from a peer that suspects it missed something (see
+     * signaling.js's requestResync()).
+     */
+    announceOwnState() {
+        this.signaling.announceMediaState(this.alpineStore.micOn, this.alpineStore.camOn);
+
+        if (this.screenStream) {
+            this.signaling.announcePresentation(true, this.displayName);
+        }
+    }
+
     /** A peer toggled their mic/camera — update the sidebar entry and their tile badges. */
     handleMediaState({ from, micOn, camOn }) {
         if (! this.alpineStore.peers[from]) {
@@ -355,6 +381,20 @@ export class RoomController {
 
     async startPresenting() {
         if (this.screenStream) {
+            return;
+        }
+
+        // getDisplayMedia doesn't exist at all on several mobile browsers
+        // (notably iOS Safari on many versions) — calling it there throws
+        // synchronously, which the catch below already swallowed
+        // identically to "user cancelled the picker." From the tapper's
+        // side those look the same: nothing happens. Checking first means
+        // the one case that's a real, permanent capability gap — not a
+        // change-your-mind — gets an actual explanation instead of a
+        // silently dead button.
+        if (! navigator.mediaDevices?.getDisplayMedia) {
+            this.alpineStore.selfError = "Screen sharing isn't supported in this browser.";
+
             return;
         }
 
@@ -596,6 +636,7 @@ export class RoomController {
     stop() {
         clearInterval(this.heartbeatTimer);
         this.heartbeatTimer = null;
+        document.removeEventListener('visibilitychange', this.handleVisibilityChange);
 
         this.peers.forEach(({ peer, tile }) => {
             peer.close();

@@ -27,6 +27,7 @@ export class SignalingClient {
     join({
         onHere, onJoining, onLeaving, onSignal, onPresentation,
         onMediaState, onSpeaking, onChat, onKicked, onMeetingEnded, onHostPromoted,
+        onResyncRequest,
     }) {
         this.channel = window.Echo.join(`meeting.${this.meetingUuid}`)
             .here((members) => onHere(members.filter((m) => m.id !== this.participantId)))
@@ -75,7 +76,20 @@ export class SignalingClient {
                 }
             })
             .listen('.meeting.ended', () => onMeetingEnded())
-            .listen('.host.promoted', (event) => onHostPromoted(event));
+            .listen('.host.promoted', (event) => onHostPromoted(event))
+            // Whispers are never replayed and are trivially lost — a mobile
+            // browser that throttled/suspended this tab's WebSocket while
+            // backgrounded (screen locked, app-switched away) can sit
+            // "connected" without ever having actually received a mic/cam
+            // or presentation change announced during that window, with no
+            // error to react to. requestResync() below asks everyone to
+            // just re-announce their current state from scratch, rather
+            // than trying to detect and recover from that gap precisely.
+            .listenForWhisper('resync-request', (payload) => {
+                if (payload.from !== this.participantId) {
+                    onResyncRequest();
+                }
+            });
 
         return this.channel;
     }
@@ -98,6 +112,11 @@ export class SignalingClient {
     /** Broadcast a speaking/not-speaking transition (called on change only, not per-sample). */
     announceSpeaking(speaking) {
         this.channel?.whisper('speaking', { from: this.participantId, speaking });
+    }
+
+    /** Ask every other participant to re-announce their current media/presentation state. */
+    requestResync() {
+        this.channel?.whisper('resync-request', { from: this.participantId });
     }
 
     leave() {
