@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Events\HostPromoted;
+use App\Events\MeetingEnded;
 use App\Models\Meeting;
 use App\Services\ParticipantService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -230,7 +231,7 @@ class ParticipantServiceTest extends TestCase
 
     public function test_the_only_participant_leaving_has_no_successor_to_promote(): void
     {
-        Event::fake([HostPromoted::class]);
+        Event::fake([HostPromoted::class, MeetingEnded::class]);
 
         $meeting = Meeting::factory()->create();
         $service = app(ParticipantService::class);
@@ -241,6 +242,32 @@ class ParticipantServiceTest extends TestCase
 
         Event::assertNotDispatched(HostPromoted::class);
         $this->assertSame(0, $service->activeCount($meeting));
+
+        // With no successor to hand host status to, the now-empty meeting
+        // is ended immediately rather than left dangling `active`.
+        $meeting->refresh();
+        $this->assertSame('ended', $meeting->status);
+        $this->assertNotNull($meeting->ended_at);
+        $this->assertDatabaseCount('participants', 0);
+        Event::assertDispatched(MeetingEnded::class, fn ($event) => $event->meetingUuid === $meeting->uuid);
+    }
+
+    public function test_the_host_leaving_does_not_end_the_meeting_when_a_co_host_remains(): void
+    {
+        Event::fake([HostPromoted::class, MeetingEnded::class]);
+
+        $meeting = Meeting::factory()->create();
+        $service = app(ParticipantService::class);
+        $hostId = (string) Str::uuid();
+
+        $service->join($meeting, $hostId, 'Host', isHost: true);
+        $coHost = $service->join($meeting, (string) Str::uuid(), 'Co-host');
+        $coHost->forceFill(['is_host' => true])->save();
+
+        $service->leave($meeting, $hostId);
+
+        Event::assertNotDispatched(MeetingEnded::class);
+        $this->assertSame('active', $meeting->fresh()->status);
     }
 
     public function test_prune_stale_promotes_a_successor_when_the_stale_participant_was_host(): void

@@ -12,11 +12,17 @@ use App\Models\Participant;
  * Owns participant membership rules for a meeting. Kept separate from
  * MeetingService because meeting lifecycle (create/expire/end) and
  * participant membership (join/leave/kick) change for different reasons
- * and are tested independently.
+ * and are tested independently — the one intentional coupling is
+ * promoteNextHost() reaching into MeetingService::end() when the last
+ * participant to leave has no successor to hand host status to.
  */
 class ParticipantService
 {
     use BroadcastsQuietly;
+
+    public function __construct(private readonly MeetingService $meetings)
+    {
+    }
 
     public function join(Meeting $meeting, string $participantId, string $displayName, bool $isHost = false): Participant
     {
@@ -99,8 +105,11 @@ class ParticipantService
      * successor — hands host status to whoever has been in the call
      * longest, the same heuristic Zoom/Meet use for automatic host
      * reassignment. A no-op if another host is already present (a
-     * pre-existing co-host, or this participant wasn't the only host),
-     * and a no-op if the meeting is now empty (nothing left to promote).
+     * pre-existing co-host, or this participant wasn't the only host).
+     * If the host who just left was the last participant, there's no one
+     * to hand off to — the meeting is ended the same way an explicit
+     * "End meeting" click would, rather than left dangling `active` with
+     * nobody in it until the next PruneMeetings sweep.
      */
     private function promoteNextHost(Meeting $meeting): void
     {
@@ -111,6 +120,10 @@ class ParticipantService
         $successor = $meeting->activeParticipants()->orderBy('joined_at')->first();
 
         if (! $successor) {
+            if ($meeting->status === 'active') {
+                $this->meetings->end($meeting);
+            }
+
             return;
         }
 

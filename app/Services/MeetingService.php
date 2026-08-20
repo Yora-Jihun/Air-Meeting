@@ -84,6 +84,11 @@ class MeetingService
      * has the link open. Auto-expiry (TTL) is a separate path in
      * PruneMeetings that doesn't call this method, so it still only
      * cleans up on that 30-day schedule.
+     *
+     * Also called by ParticipantService::promoteNextHost() when the host
+     * leaves (or is pruned as stale) with nobody left to hand host status
+     * to — an empty meeting is ended immediately rather than left
+     * dangling `active` with zero participants.
      */
     public function end(Meeting $meeting): void
     {
