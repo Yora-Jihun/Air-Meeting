@@ -296,16 +296,25 @@ export class RoomController {
     /**
      * Re-broadcasts everything about this client that only ever traveled
      * as a whisper (never persisted, never replayed by Reverb) — current
-     * mic/cam state, raised-hand state, and, if applicable, that this
-     * client is presenting. Used both for a normal late joiner
-     * (onJoining) and for a resync request from a peer that suspects it
-     * missed something (see signaling.js's requestResync()).
+     * mic/cam state, raised-hand state, whether this client is mid-speech,
+     * and, if applicable, that this client is presenting. Used both for a
+     * normal late joiner (onJoining) and for a resync request from a peer
+     * that suspects it missed something (see signaling.js's
+     * requestResync()). The speaking case matters most here: without it, a
+     * participant who joins mid-sentence never sees the current speaker's
+     * ring light up until they happen to pause and start again, since a
+     * whisper announcing "started speaking" only ever fires on that
+     * transition, never on a fixed interval.
      */
     announceOwnState() {
         this.signaling.announceMediaState(this.alpineStore.micOn, this.alpineStore.camOn);
 
         if (this.alpineStore.handRaised) {
             this.signaling.announceHandRaised(true);
+        }
+
+        if (media.speaking) {
+            this.signaling.announceSpeaking(true);
         }
 
         if (this.screenStream) {
@@ -640,7 +649,7 @@ export class RoomController {
             return;
         }
 
-        tile.wrapper.classList.toggle('ring-2', speaking);
+        tile.wrapper.classList.toggle('ring-[3px]', speaking);
         tile.wrapper.classList.toggle('ring-brand-400', speaking);
         tile.wrapper.classList.toggle('ring-1', ! speaking);
         tile.wrapper.classList.toggle('ring-white/10', ! speaking);

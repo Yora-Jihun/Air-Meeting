@@ -8,6 +8,7 @@ class MediaStore {
     micOn = true;
     camOn = true;
     error = null;
+    speaking = false;
 
     _audioContext = null;
     _analyser = null;
@@ -106,6 +107,7 @@ class MediaStore {
 
             if (isSpeaking !== speaking) {
                 speaking = isSpeaking;
+                this.speaking = speaking;
                 onChange(speaking);
             }
 
@@ -124,6 +126,7 @@ class MediaStore {
         this._audioContext = null;
         this._analyser = null;
         this._speakingFrame = null;
+        this.speaking = false;
     }
 
     stopAll() {
